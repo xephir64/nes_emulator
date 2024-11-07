@@ -1,4 +1,4 @@
-use crate::opcode::{CPU_OPS_CODES, OPCODES_MAP};
+use crate::opcode::OPCODES_MAP;
 
 pub struct CPU {
     pub register_a: u8,
@@ -57,6 +57,24 @@ impl CPU {
         self.mem_write(pos + 1, hi);
     }
 
+    fn adc(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value_1 = self.register_a;
+        let value_2 = self.mem_read(addr);
+        let carry = self.status & 0b0000_0001;
+
+        let sum = value_1 as u16 + value_2 as u16 + carry as u16;
+
+        let enable_carry = sum > 255;
+
+        let result = sum as u8;
+        let is_overflow = (value_2 ^ result) & (result ^ self.register_a) & 0x80 != 0;
+
+        self.register_a = sum as u8;
+        self.update_carry_flag(enable_carry);
+        self.update_overflow_flag(is_overflow);
+    }
+
     fn lda(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
@@ -85,6 +103,22 @@ impl CPU {
         }
 
         self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn update_carry_flag(&mut self, enable: bool) {
+        if enable {
+            self.status = self.status | 0b0000_0001;
+        } else {
+            self.status = self.status & 0b1111_1110;
+        }
+    }
+
+    fn update_overflow_flag(&mut self, enable: bool) {
+        if enable {
+            self.status = self.status | 0b0100_0000;
+        } else {
+            self.status = self.status & 0b1011_1111;
+        }
     }
 
     fn update_zero_and_negative_flags(&mut self, result: u8) {
@@ -183,6 +217,10 @@ impl CPU {
             let opcode = OPCODES_MAP.get(&opscode).unwrap();
 
             match opcode.mnemonic {
+                "ADC" => {
+                    self.adc(&opcode.addr);
+                }
+
                 "LDA" => {
                     self.lda(&opcode.addr);
                 }
@@ -265,5 +303,35 @@ mod test {
         cpu.load_and_run(vec![0xa5, 0x10, 0x00]);
 
         assert_eq!(cpu.register_a, 0x55);
+    }
+
+    #[test]
+    fn test_adc_immediate_basic_addition() {
+        let mut cpu = CPU::new();
+        cpu.register_a = 0x05;
+        cpu.load_and_run(vec![0xA9, 0x05, 0x69, 0x03, 0x00]); // LDA #$05 ADC #$03
+
+        assert_eq!(cpu.register_a, 0x08); // 5 + 3 = 8
+        assert!(cpu.status & 0b0000_0001 == 0);
+        assert!(cpu.status & 0b0000_0010 == 0);
+        assert!(cpu.status & 0b1000_0000 == 0);
+    }
+
+    #[test]
+    fn test_adc_with_carry_set() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xA9, 0xFF, 0x69, 0x01, 0xA9, 0x05, 0x69, 0x03, 0x00]); // LDA #$FF ADC #$01 LDA #$05 ADC #$03
+
+        assert_eq!(cpu.register_a, 0x09);
+        assert!(cpu.status & 0b0000_0001 == 0);
+    }
+
+    #[test]
+    fn test_adc_overflow() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xA9, 0x50, 0x69, 0x50, 0x00]); // LDA #$50 ADC #$50
+
+        assert_eq!(cpu.register_a, 0xa0); // 0x50 + 0x50 = 0xa0
+        assert!(cpu.status & 0b0100_0000 != 0);
     }
 }
