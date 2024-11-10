@@ -1,11 +1,14 @@
 use crate::opcode::OPCODES_MAP;
 
+const STACK: u16 = 0x0100;
+const STACK_RESET: u8 = 0xfd;
 pub struct CPU {
     pub register_a: u8,
     pub register_x: u8,
     pub register_y: u8,
     pub status: u8,
     pub program_counter: u16,
+    pub stack_pointer: u8,
     memory: [u8; 0xFFFF],
 }
 
@@ -32,6 +35,7 @@ impl CPU {
             register_y: 0,
             status: 0,
             program_counter: 0,
+            stack_pointer: STACK_RESET,
             memory: [0; 0xFFFF],
         }
     }
@@ -55,6 +59,42 @@ impl CPU {
         let lo = (data & 0xff) as u8;
         self.mem_write(pos, lo);
         self.mem_write(pos + 1, hi);
+    }
+
+    fn stack_pop(&mut self) -> u8 {
+        self.stack_pointer = self.stack_pointer.wrapping_add(1);
+        self.mem_read((STACK as u16) + self.stack_pointer as u16)
+    }
+
+    fn stack_push(&mut self, data: u8) {
+        self.mem_write((STACK as u16) + self.stack_pointer as u16, data);
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1)
+    }
+
+    fn stack_push_u16(&mut self, data: u16) {
+        let hi = (data >> 8) as u8;
+        let lo = (data & 0xff) as u8;
+        self.stack_push(hi);
+        self.stack_push(lo);
+    }
+
+    fn stack_pop_u16(&mut self) -> u16 {
+        let lo = self.stack_pop() as u16;
+        let hi = self.stack_pop() as u16;
+
+        hi << 8 | lo
+    }
+
+    fn jump_to_branch(&mut self, condition: bool) {
+        if condition {
+            let jump = self.mem_read(self.program_counter) as i8;
+            let jump_addr = self
+                .program_counter
+                .wrapping_add(1)
+                .wrapping_add(jump as u16);
+
+            self.program_counter = jump_addr;
+        }
     }
 
     fn adc(&mut self, mode: &AddressingMode) {
@@ -89,6 +129,7 @@ impl CPU {
     fn asl_accumulator(&mut self) {
         self.update_carry_flag(self.register_a >> 7 == 1);
         self.register_a = self.register_a << 1;
+        self.update_zero_and_negative_flags(self.register_a);
     }
 
     fn asl(&mut self, mode: &AddressingMode) {
@@ -102,12 +143,268 @@ impl CPU {
         self.update_zero_and_negative_flags(data);
     }
 
+    fn bcc(&mut self) {
+        let is_carry_flag = self.status & 0b0000_0001 == 0;
+        self.jump_to_branch(is_carry_flag);
+    }
+
+    fn bcs(&mut self) {
+        let is_carry_flag = self.status & 0b0000_0001 == 1;
+        self.jump_to_branch(is_carry_flag);
+    }
+
+    fn beq(&mut self) {
+        let is_zero_set = self.status & 0b0000_0010 == 1;
+        self.jump_to_branch(is_zero_set);
+    }
+
+    fn bit(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let mem_val = self.mem_read(addr);
+
+        if self.register_a & mem_val == 0 {
+            self.status = self.status | 0b0000_0010;
+        } else {
+            self.status = self.status & 0b1111_1101;
+        }
+
+        self.update_overflow_flag(mem_val >> 6 == 1);
+        self.update_negative_flag(mem_val >> 7 == 1);
+    }
+
+    fn bmi(&mut self) {
+        self.jump_to_branch(self.status >> 7 == 1);
+    }
+
+    fn bne(&mut self) {
+        self.jump_to_branch(self.status >> 2 == 0);
+    }
+
+    fn bpl(&mut self) {
+        self.jump_to_branch(self.status >> 7 == 0);
+    }
+
+    fn bvc(&mut self) {
+        self.jump_to_branch(self.status >> 6 == 0);
+    }
+
+    fn bvs(&mut self) {
+        self.jump_to_branch(self.status >> 6 == 1);
+    }
+
+    fn clc(&mut self) {
+        self.update_carry_flag(false);
+    }
+
+    fn cld(&mut self) {
+        self.status = self.status & 0b1111_0111;
+    }
+
+    fn cli(&mut self) {
+        self.status = self.status & 0b1111_1011;
+    }
+
+    fn clv(&mut self) {
+        self.update_overflow_flag(false);
+    }
+
+    fn cmp(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+
+        if self.register_a >= value {
+            self.update_carry_flag(true);
+        } else {
+            self.update_carry_flag(false);
+        }
+
+        self.update_zero_and_negative_flags(self.register_a.wrapping_sub(value));
+    }
+
+    fn cpx(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+
+        if self.register_x >= value {
+            self.update_carry_flag(true);
+        } else {
+            self.update_carry_flag(false);
+        }
+
+        self.update_zero_and_negative_flags(self.register_x.wrapping_sub(value));
+    }
+
+    fn cpy(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+
+        if self.register_y >= value {
+            self.update_carry_flag(true);
+        } else {
+            self.update_carry_flag(false);
+        }
+
+        self.update_zero_and_negative_flags(self.register_y.wrapping_sub(value));
+    }
+
+    fn dec(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let mut value = self.mem_read(addr);
+
+        value = value.wrapping_sub(1);
+        self.mem_write(addr, value);
+        self.update_zero_and_negative_flags(value);
+    }
+
+    fn dex(&mut self) {
+        self.register_a = self.register_a.wrapping_sub(1);
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn dey(&mut self) {
+        self.register_y = self.register_y.wrapping_sub(1);
+        self.update_zero_and_negative_flags(self.register_y);
+    }
+
+    fn eor(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let a = self.register_a;
+        let m = self.mem_read(addr);
+
+        self.register_a = a ^ m;
+
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn inc(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let mut value = self.mem_read(addr);
+
+        value = value.wrapping_add(1);
+
+        self.mem_write(addr, value);
+        self.update_zero_and_negative_flags(value);
+    }
+
+    fn inx(&mut self) {
+        if self.register_x != u8::MAX {
+            self.register_x = self.register_x + 1;
+        } else {
+            self.register_x = 0;
+        }
+
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn iny(&mut self) {
+        if self.register_y != u8::MAX {
+            self.register_y = self.register_y + 1;
+        } else {
+            self.register_y = 0;
+        }
+
+        self.update_zero_and_negative_flags(self.register_y);
+    }
+
+    fn jmp_abs(&mut self) {
+        let mem_address = self.mem_read_u16(self.program_counter);
+        self.program_counter = mem_address;
+    }
+
+    fn jmp_indirect(&mut self) {
+        let mem_address = self.mem_read_u16(self.program_counter);
+
+        let indirect_ref = if mem_address & 0x00FF == 0x00FF {
+            let lo = self.mem_read(mem_address);
+            let hi = self.mem_read(mem_address & 0xFF00);
+            (hi as u16) << 8 | (lo as u16)
+        } else {
+            self.mem_read_u16(mem_address)
+        };
+
+        self.program_counter = indirect_ref;
+    }
+
+    fn jsr(&mut self) {
+        self.stack_push_u16(self.program_counter + 2 - 1);
+        let mem_address = self.mem_read_u16(self.program_counter);
+        self.program_counter = mem_address;
+    }
+
     fn lda(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
 
         self.register_a = value;
         self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn ldx(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+
+        self.register_x = value;
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn ldy(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+
+        self.register_y = value;
+        self.update_zero_and_negative_flags(self.register_y);
+    }
+
+    fn lsr_accumulator(&mut self) {
+        self.update_carry_flag(self.register_a & 1 == 1);
+        self.register_a = self.register_a >> 1;
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn lsr(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+
+        self.update_carry_flag(value & 1 == 1);
+
+        let data = value >> 1;
+        self.mem_write(addr, data);
+        self.update_zero_and_negative_flags(data);
+    }
+
+    fn ora(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let a = self.register_a;
+        let m = self.mem_read(addr);
+
+        self.register_a = a | m;
+
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn pha(&mut self) {
+        self.stack_push(self.register_a);
+    }
+
+    fn php(&mut self) {
+        let mut status = self.status.clone();
+
+        status = status | 0b0011_0000;
+        self.stack_push(status);
+    }
+
+    fn pla(&mut self) {
+        let value = self.stack_pop();
+
+        self.register_a = value;
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn plp(&mut self) {
+        let mut flags = self.stack_pop();
+        flags = flags & 0b1110_1111; // unset BREAK
+        flags = flags | 0b0010_0000; // set BREAK 2
+        self.status = flags;
     }
 
     fn sta(&mut self, mode: &AddressingMode) {
@@ -119,16 +416,6 @@ impl CPU {
 
     fn tax(&mut self) {
         self.register_x = self.register_a;
-        self.update_zero_and_negative_flags(self.register_x);
-    }
-
-    fn inx(&mut self) {
-        if self.register_x != u8::MAX {
-            self.register_x = self.register_x + 1;
-        } else {
-            self.register_x = 0;
-        }
-
         self.update_zero_and_negative_flags(self.register_x);
     }
 
@@ -145,6 +432,14 @@ impl CPU {
             self.status = self.status | 0b0100_0000;
         } else {
             self.status = self.status & 0b1011_1111;
+        }
+    }
+
+    fn update_negative_flag(&mut self, enable: bool) {
+        if enable {
+            self.status = self.status | 0b1000_0000;
+        } else {
+            self.status = self.status & 0b0111_1111;
         }
     }
 
@@ -223,7 +518,7 @@ impl CPU {
         self.register_a = 0;
         self.register_x = 0;
         self.status = 0;
-
+        self.stack_pointer = STACK_RESET;
         self.program_counter = self.mem_read_u16(0xFFFC);
     }
 
@@ -244,39 +539,177 @@ impl CPU {
             self.program_counter += 1;
             let program_counter_state = self.program_counter;
 
-            let opcode = OPCODES_MAP.get(&opscode).unwrap();
+            let instruction = OPCODES_MAP.get(&opscode).unwrap();
 
-            match opcode.mnemonic {
+            match instruction.mnemonic {
                 "ADC" => {
-                    self.adc(&opcode.addr);
+                    self.adc(&instruction.addr);
                 }
 
                 "AND" => {
-                    self.and(&opcode.addr);
+                    self.and(&instruction.addr);
                 }
 
                 "ASL" => {
-                    if opcode.op_code == 0x0A {
+                    if instruction.op_code == 0x0A {
                         self.asl_accumulator();
                     } else {
-                        self.asl(&opcode.addr);
+                        self.asl(&instruction.addr);
                     }
                 }
 
-                "LDA" => {
-                    self.lda(&opcode.addr);
+                "BCC" => {
+                    self.bcc();
                 }
 
-                "STA" => {
-                    self.sta(&opcode.addr);
+                "BCS" => {
+                    self.bcs();
                 }
 
-                "TAX" => {
-                    self.tax();
+                "BEQ" => {
+                    self.beq();
+                }
+
+                "BIT" => {
+                    self.bit(&instruction.addr);
+                }
+
+                "BMI" => {
+                    self.bmi();
+                }
+
+                "BNE" => {
+                    self.bne();
+                }
+
+                "BPL" => {
+                    self.bpl();
+                }
+
+                "BVC" => {
+                    self.bvc();
+                }
+
+                "BVS" => {
+                    self.bvs();
+                }
+
+                "CLC" => {
+                    self.clc();
+                }
+
+                "CLD" => {
+                    self.cld();
+                }
+
+                "CLI" => {
+                    self.cli();
+                }
+
+                "CLV" => {
+                    self.clv();
+                }
+
+                "CMP" => {
+                    self.cmp(&instruction.addr);
+                }
+
+                "CPX" => {
+                    self.cpx(&instruction.addr);
+                }
+
+                "CPY" => {
+                    self.cpy(&instruction.addr);
+                }
+
+                "DEC" => {
+                    self.dec(&instruction.addr);
+                }
+
+                "DEX" => {
+                    self.dex();
+                }
+
+                "DEY" => {
+                    self.dey();
+                }
+
+                "EOR" => {
+                    self.eor(&instruction.addr);
+                }
+
+                "INC" => {
+                    self.inc(&instruction.addr);
                 }
 
                 "INX" => {
                     self.inx();
+                }
+
+                "INY" => {
+                    self.iny();
+                }
+
+                "JMP" => {
+                    if instruction.op_code == 0x4C {
+                        self.jmp_abs();
+                    } else {
+                        self.jmp_indirect();
+                    }
+                }
+
+                "JSR" => {
+                    self.jsr();
+                }
+
+                "LDA" => {
+                    self.lda(&instruction.addr);
+                }
+
+                "LDX" => {
+                    self.ldx(&instruction.addr);
+                }
+
+                "LDY" => {
+                    self.ldy(&instruction.addr);
+                }
+
+                "LSR" => {
+                    if instruction.op_code == 0x4A {
+                        self.lsr_accumulator();
+                    } else {
+                        self.lsr(&instruction.addr);
+                    }
+                }
+
+                "NOP" => {}
+
+                "ORA" => {
+                    self.ora(&instruction.addr);
+                }
+
+                "PHA" => {
+                    self.pha();
+                }
+
+                "PHP" => {
+                    self.php();
+                }
+
+                "PLA" => {
+                    self.pla();
+                }
+
+                "PLP" => {
+                    self.plp();
+                }
+
+                "STA" => {
+                    self.sta(&instruction.addr);
+                }
+
+                "TAX" => {
+                    self.tax();
                 }
 
                 "BRK" => {
@@ -287,7 +720,7 @@ impl CPU {
             }
 
             if program_counter_state == self.program_counter {
-                self.program_counter += (opcode.byte - 1) as u16;
+                self.program_counter += (instruction.byte - 1) as u16;
             }
         }
     }
@@ -418,6 +851,28 @@ mod test {
         assert_eq!(cpu.mem_read(0x10), 0x02);
         assert!(cpu.status & 0b0000_0001 != 0);
         assert!(cpu.status & 0b0000_0010 == 0);
+        assert!(cpu.status & 0b1000_0000 == 0);
+    }
+
+    #[test]
+    fn test_0x24_bit_zero_flag_set() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0x92); // 0b1001_0010 so negative should be set
+        cpu.load_and_run(vec![0xA9, 0x00, 0x24, 0x10, 0x00]); // LDA #$00, BIT $10 BRK
+
+        assert!(cpu.status & 0b0000_0010 != 0);
+        assert!(cpu.status & 0b0100_0000 == 0);
+        assert!(cpu.status & 0b1000_0000 != 0);
+    }
+
+    #[test]
+    fn test_0x24_bit_zero_flag_clear() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0x01); // 0b0000_0001
+        cpu.load_and_run(vec![0xA9, 0x01, 0x24, 0x10, 0x00]); // LDA #$01, BIT $10 BRK
+
+        assert!(cpu.status & 0b0000_0010 == 0);
+        assert!(cpu.status & 0b0100_0000 == 0);
         assert!(cpu.status & 0b1000_0000 == 0);
     }
 }
