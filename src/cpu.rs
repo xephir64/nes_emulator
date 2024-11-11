@@ -499,6 +499,18 @@ impl CPU {
         self.update_zero_and_negative_flags(self.register_a);
     }
 
+    fn sec(&mut self) {
+        self.update_carry_flag(true);
+    }
+
+    fn sed(&mut self) {
+        self.status = self.status | 0b0000_1000;
+    }
+
+    fn sei(&mut self) {
+        self.status = self.status | 0b0000_0100;
+    }
+
     fn sta(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         self.mem_write(addr, self.register_a);
@@ -506,9 +518,46 @@ impl CPU {
         self.update_zero_and_negative_flags(self.register_a);
     }
 
+    fn stx(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.mem_write(addr, self.register_x);
+
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn sty(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.mem_write(addr, self.register_y);
+
+        self.update_zero_and_negative_flags(self.register_y);
+    }
+
     fn tax(&mut self) {
         self.register_x = self.register_a;
         self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn tay(&mut self) {
+        self.register_y = self.register_a;
+        self.update_zero_and_negative_flags(self.register_y);
+    }
+
+    fn tsx(&mut self) {
+        self.register_x = self.stack_pointer;
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn txa(&mut self) {
+        self.register_a = self.register_x;
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn txs(&mut self) {
+        self.stack_pointer = self.register_x;
+    }
+
+    fn tya(&mut self) {
+        self.register_a = self.register_y;
     }
 
     fn update_carry_flag(&mut self, enable: bool) {
@@ -824,12 +873,52 @@ impl CPU {
                     self.sbc(&instruction.addr);
                 }
 
+                "SEC" => {
+                    self.sec();
+                }
+
+                "SED" => {
+                    self.sed();
+                }
+
+                "SEI" => {
+                    self.sei();
+                }
+
                 "STA" => {
                     self.sta(&instruction.addr);
                 }
 
+                "STX" => {
+                    self.stx(&instruction.addr);
+                }
+
+                "STY" => {
+                    self.sty(&instruction.addr);
+                }
+
                 "TAX" => {
                     self.tax();
+                }
+
+                "TAY" => {
+                    self.tay();
+                }
+
+                "TSX" => {
+                    self.tsx();
+                }
+
+                "TXA" => {
+                    self.txa();
+                }
+
+                "TXS" => {
+                    self.txs();
+                }
+
+                "TYA" => {
+                    self.tya();
                 }
 
                 "BRK" => {
