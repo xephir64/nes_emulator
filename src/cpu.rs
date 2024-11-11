@@ -407,6 +407,98 @@ impl CPU {
         self.status = flags;
     }
 
+    fn rol_accumulator(&mut self) {
+        let old_carry_flag = self.register_a >> 1 == 1;
+
+        self.update_carry_flag(self.register_a >> 1 == 1);
+        self.register_a = self.register_a << 1;
+
+        if old_carry_flag {
+            self.register_a = self.register_a | 1;
+        }
+
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn rol(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        let old_carry_flag = self.status >> 1 == 1;
+
+        self.update_carry_flag(value >> 1 == 1);
+
+        let mut data = value << 1;
+        if old_carry_flag {
+            data = data | 1;
+        }
+
+        self.mem_write(addr, data);
+        self.update_zero_and_negative_flags(data);
+    }
+
+    fn ror_accumulator(&mut self) {
+        let old_carry_flag = self.register_a >> 1 == 1;
+
+        self.update_carry_flag(self.register_a >> 1 == 1);
+        self.register_a = self.register_a >> 1;
+
+        if old_carry_flag {
+            self.register_a = self.register_a | 0b1000_0000;
+        }
+
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn ror(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        let old_carry_flag = self.status >> 1 == 1;
+
+        self.update_carry_flag(value >> 7 == 1);
+
+        let mut data = value >> 1;
+        if old_carry_flag {
+            data = data | 0b1000_0000;
+        }
+
+        self.mem_write(addr, data);
+        self.update_zero_and_negative_flags(data);
+    }
+
+    fn rti(&mut self) {
+        let mut flags = self.stack_pop();
+        flags = flags & 0b1110_1111; // unset BREAK
+        flags = flags | 0b0010_0000; // set BREAK 2
+        self.status = flags;
+
+        self.program_counter = self.stack_pop_u16();
+    }
+
+    fn rts(&mut self) {
+        self.program_counter = self.stack_pop_u16() + 1;
+    }
+
+    fn sbc(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let a = self.register_a;
+        let m = self.mem_read(addr);
+        let carry = self.status & 0b0000_0001;
+
+        let sub = (m as i8).wrapping_neg().wrapping_sub(1) as u8; // -B = !B - 1
+
+        let sum = a as u16 + sub as u16 + carry as u16; // A + (-B) + C
+
+        let enable_carry = sum > 255;
+
+        let result = sum as u8;
+        let is_overflow = (m ^ result) & (result ^ self.register_a) & 0x80 != 0;
+
+        self.register_a = sum as u8;
+        self.update_carry_flag(enable_carry);
+        self.update_overflow_flag(is_overflow);
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
     fn sta(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         self.mem_write(addr, self.register_a);
@@ -704,6 +796,34 @@ impl CPU {
                     self.plp();
                 }
 
+                "ROL" => {
+                    if instruction.op_code == 0x2A {
+                        self.rol_accumulator();
+                    } else {
+                        self.rol(&instruction.addr);
+                    }
+                }
+
+                "ROR" => {
+                    if instruction.op_code == 0x6A {
+                        self.ror_accumulator();
+                    } else {
+                        self.ror(&instruction.addr);
+                    }
+                }
+
+                "RTI" => {
+                    self.rti();
+                }
+
+                "RTS" => {
+                    self.rts();
+                }
+
+                "SBC" => {
+                    self.sbc(&instruction.addr);
+                }
+
                 "STA" => {
                     self.sta(&instruction.addr);
                 }
@@ -839,7 +959,7 @@ mod test {
         assert_eq!(cpu.register_a, 0x9A);
         assert!(cpu.status & 0b0000_0001 == 0);
         assert!(cpu.status & 0b0000_0010 == 0);
-        assert!(cpu.status & 0b1000_0000 == 0);
+        assert!(cpu.status & 0b1000_0000 != 0);
     }
 
     #[test]
@@ -874,5 +994,38 @@ mod test {
         assert!(cpu.status & 0b0000_0010 == 0);
         assert!(cpu.status & 0b0100_0000 == 0);
         assert!(cpu.status & 0b1000_0000 == 0);
+    }
+
+    #[test]
+    fn test_sbc_immediate_basic_subtraction() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xA9, 0x10, 0xE9, 0x05, 0x00]); // LDA #$10 SBC #$05 BRK
+
+        assert_eq!(cpu.register_a, 0x0A);
+        assert!(cpu.status & 0b0000_0001 == 1);
+        assert!(cpu.status & 0b0000_0010 == 0);
+        assert!(cpu.status & 0b1000_0000 == 0);
+    }
+
+    #[test]
+    fn test_sbc_with_borrow() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xA9, 0x05, 0xE9, 0x10, 0x00]); // LDA #$05 SBC #$10 BRK
+
+        assert_eq!(cpu.register_a, 0xF4); // A=$f4
+        assert!(cpu.status & 0b0000_0001 == 0); // NV-BDIZC
+                                                // 10110000
+        assert!(cpu.status & 0b1000_0000 != 0);
+    }
+
+    #[test]
+    fn test_sbc() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xA9, 0x05, 0xE9, 0x05, 0x00]); // LDA #$05 SBC #$05 BRK
+
+        assert_eq!(cpu.register_a, 0xff);
+        assert!(cpu.status & 0b0000_0001 == 0);
+        assert!(cpu.status & 0b0000_0010 == 0);
+        assert!(cpu.status & 0b1000_0000 != 0);
     }
 }
