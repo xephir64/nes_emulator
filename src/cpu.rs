@@ -1,4 +1,6 @@
-use crate::opcode::OPCODES_MAP;
+use std::collections::HashMap;
+
+use crate::opcode::{self};
 
 const STACK: u16 = 0x0100;
 const STACK_RESET: u8 = 0xfd;
@@ -40,11 +42,11 @@ impl CPU {
         }
     }
 
-    fn mem_read(&self, addr: u16) -> u8 {
+    pub fn mem_read(&self, addr: u16) -> u8 {
         self.memory[addr as usize]
     }
 
-    fn mem_write(&mut self, addr: u16, data: u8) {
+    pub fn mem_write(&mut self, addr: u16, data: u8) {
         self.memory[addr as usize] = data;
     }
 
@@ -154,7 +156,7 @@ impl CPU {
     }
 
     fn beq(&mut self) {
-        let is_zero_set = self.status & 0b0000_0010 == 1;
+        let is_zero_set = ((self.status & 0b0000_0010) >> 1) == 1;
         self.jump_to_branch(is_zero_set);
     }
 
@@ -177,7 +179,7 @@ impl CPU {
     }
 
     fn bne(&mut self) {
-        self.jump_to_branch(self.status >> 2 == 0);
+        self.jump_to_branch(self.status >> 1 == 0);
     }
 
     fn bpl(&mut self) {
@@ -225,7 +227,7 @@ impl CPU {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
 
-        if self.register_x >= value {
+        if value <= self.register_x {
             self.update_carry_flag(true);
         } else {
             self.update_carry_flag(false);
@@ -257,8 +259,8 @@ impl CPU {
     }
 
     fn dex(&mut self) {
-        self.register_a = self.register_a.wrapping_sub(1);
-        self.update_zero_and_negative_flags(self.register_a);
+        self.register_x = self.register_x.wrapping_sub(1);
+        self.update_zero_and_negative_flags(self.register_x);
     }
 
     fn dey(&mut self) {
@@ -287,22 +289,12 @@ impl CPU {
     }
 
     fn inx(&mut self) {
-        if self.register_x != u8::MAX {
-            self.register_x = self.register_x + 1;
-        } else {
-            self.register_x = 0;
-        }
-
+        self.register_x = self.register_x.wrapping_add(1);
         self.update_zero_and_negative_flags(self.register_x);
     }
 
     fn iny(&mut self) {
-        if self.register_y != u8::MAX {
-            self.register_y = self.register_y + 1;
-        } else {
-            self.register_y = 0;
-        }
-
+        self.register_y = self.register_y.wrapping_add(1);
         self.update_zero_and_negative_flags(self.register_y);
     }
 
@@ -328,7 +320,7 @@ impl CPU {
     fn jsr(&mut self) {
         self.stack_push_u16(self.program_counter + 2 - 1);
         let mem_address = self.mem_read_u16(self.program_counter);
-        self.program_counter = mem_address;
+        self.program_counter = mem_address
     }
 
     fn lda(&mut self, mode: &AddressingMode) {
@@ -408,9 +400,9 @@ impl CPU {
     }
 
     fn rol_accumulator(&mut self) {
-        let old_carry_flag = self.register_a >> 1 == 1;
+        let old_carry_flag = self.status & 1 == 1;
 
-        self.update_carry_flag(self.register_a >> 1 == 1);
+        self.update_carry_flag(self.register_a >> 7 == 1);
         self.register_a = self.register_a << 1;
 
         if old_carry_flag {
@@ -423,9 +415,9 @@ impl CPU {
     fn rol(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
-        let old_carry_flag = self.status >> 1 == 1;
+        let old_carry_flag = self.status & 1 == 1;
 
-        self.update_carry_flag(value >> 1 == 1);
+        self.update_carry_flag(value >> 7 == 1);
 
         let mut data = value << 1;
         if old_carry_flag {
@@ -437,9 +429,9 @@ impl CPU {
     }
 
     fn ror_accumulator(&mut self) {
-        let old_carry_flag = self.register_a >> 1 == 1;
+        let old_carry_flag = self.status & 1 == 1;
 
-        self.update_carry_flag(self.register_a >> 1 == 1);
+        self.update_carry_flag(self.register_a & 1 == 1);
         self.register_a = self.register_a >> 1;
 
         if old_carry_flag {
@@ -452,11 +444,12 @@ impl CPU {
     fn ror(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
-        let old_carry_flag = self.status >> 1 == 1;
+        let old_carry_flag = self.status & 1 == 1;
 
-        self.update_carry_flag(value >> 7 == 1);
+        self.update_carry_flag(value & 1 == 1);
 
         let mut data = value >> 1;
+
         if old_carry_flag {
             data = data | 0b1000_0000;
         }
@@ -594,7 +587,7 @@ impl CPU {
         if result & 0b1000_0000 != 0 {
             self.status = self.status | 0b1000_0000; // set 7th byte (aka Negative flag) to 1 if result is negative
         } else {
-            self.status = self.status & 0b0111_1111; // set 7th byte (aka Negative flag) to 1 if result is positive
+            self.status = self.status & 0b0111_1111; // set 7th byte (aka Negative flag) to 0 if result is positive
         }
     }
 
@@ -658,8 +651,9 @@ impl CPU {
     pub fn reset(&mut self) {
         self.register_a = 0;
         self.register_x = 0;
-        self.status = 0;
+        self.status = 0b0011_0000;
         self.stack_pointer = STACK_RESET;
+
         self.program_counter = self.mem_read_u16(0xFFFC);
     }
 
@@ -675,12 +669,23 @@ impl CPU {
     }
 
     pub fn run(&mut self) {
+        self.run_with_callback(|_| {});
+    }
+
+    pub fn run_with_callback<F>(&mut self, mut callback: F)
+    where
+        F: FnMut(&mut CPU),
+    {
+        let ref opcodes: HashMap<u8, &'static opcode::OpCode> = *opcode::OPCODES_MAP;
+
         loop {
             let opscode = self.mem_read(self.program_counter);
             self.program_counter += 1;
             let program_counter_state = self.program_counter;
 
-            let instruction = OPCODES_MAP.get(&opscode).unwrap();
+            let instruction = opcodes
+                .get(&opscode)
+                .expect(&format!("OpCode {:x} is not recognized", opscode));
 
             match instruction.mnemonic {
                 "ADC" => {
@@ -931,6 +936,8 @@ impl CPU {
             if program_counter_state == self.program_counter {
                 self.program_counter += (instruction.byte - 1) as u16;
             }
+
+            callback(self);
         }
     }
 }
@@ -1116,5 +1123,107 @@ mod test {
         assert!(cpu.status & 0b0000_0001 == 0);
         assert!(cpu.status & 0b0000_0010 == 0);
         assert!(cpu.status & 0b1000_0000 != 0);
+    }
+
+    #[test]
+    fn test_ora() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xA9, 0x12, 0x09, 0x08, 0x00]); // LDA #$12 ORA #$08 BRK
+
+        assert_eq!(cpu.register_a, 0x1A); // 0x12 | 0x08 = 0x1A
+    }
+
+    #[test]
+    fn test_eor() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xA9, 0x15, 0x49, 0x0F, 0x00]); // LDA #$15 EOR #$0F BRK
+
+        assert_eq!(cpu.register_a, 0x1A); // 0x15 ^ 0x0F = 0x1A
+    }
+
+    #[test]
+    fn test_cmp_equal() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xA9, 0x05, 0xC9, 0x05, 0x00]); // LDA #$05 CMP #$05 BRK
+
+        assert_eq!(cpu.register_a, 0x05);
+        assert!(cpu.status & 0b0000_0001 != 0);
+        assert!(cpu.status & 0b0000_0010 != 0);
+    }
+
+    #[test]
+    fn test_lsr_accumulator() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xA9, 0x02, 0x4A, 0x00]); // LDA #$02 LSR BRK
+
+        assert_eq!(cpu.register_a, 0x01);
+        assert!(cpu.status & 0b0000_0001 == 0);
+        assert!(cpu.status & 0b0000_0010 == 0);
+    }
+
+    #[test]
+    fn test_lsr_zero_page() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0x01);
+        cpu.load_and_run(vec![0x46, 0x10, 0x00]); // LSR $10 BRK
+
+        assert_eq!(cpu.mem_read(0x10), 0x00);
+        assert!(cpu.status & 0b0000_0001 != 0);
+        assert!(cpu.status & 0b0000_0010 != 0);
+    }
+
+    #[test]
+    fn test_rol_accumulator() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa9, 0x81, 0x2A, 0x00]); // LDA #$81 ROL BRK
+
+        assert_eq!(cpu.register_a, 0x02);
+        assert!(cpu.status & 0b0000_0001 != 0);
+        assert!(cpu.status & 0b0000_0010 == 0);
+    }
+
+    #[test]
+    fn test_rol_with_carry_in() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0x38, 0xA9, 0x40, 0x2A, 0x00]); // SEC LDA #$40 ROL BRK
+
+        assert_eq!(cpu.register_a, 0x81);
+        assert!(cpu.status & 0b0000_0001 == 0);
+    }
+
+    #[test]
+    fn test_ror_accumulator() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa9, 0x01, 0x6a, 0x00]); // LDA #$01 ROR BRK
+
+        assert_eq!(cpu.register_a, 0x00);
+        assert!(cpu.status & 0b0000_0001 != 0);
+        assert!(cpu.status & 0b0000_0010 != 0);
+    }
+
+    #[test]
+    fn test_ror_with_carry_in() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0x38, 0xa9, 0x02, 0x6A, 0x00]); // SEC LDA #$02 ROR BRK
+
+        assert_eq!(cpu.register_a, 0x81);
+        assert!(cpu.status & 0b0000_0001 == 0);
+        assert!(cpu.status & 0b1000_0000 != 0);
+    }
+
+    #[test]
+    fn test_pha_pla() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xA9, 0x45, 0x48, 0xA9, 0x00, 0x68, 0x00]); // LDA #$45 PHA LDA #$00 PLA BRK
+
+        assert_eq!(cpu.register_a, 0x45);
+    }
+
+    #[test]
+    fn test_jmp_absolute() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0x4C, 0x10, 0x00, 0x00]); // JMP $0010 BRK
+
+        assert_eq!(cpu.program_counter, 0x0011);
     }
 }
