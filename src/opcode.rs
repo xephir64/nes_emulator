@@ -6,7 +6,7 @@ use crate::cpu::AddressingMode;
 pub struct OpCode {
     pub op_code: u8,
     pub mnemonic: &'static str,
-    pub byte: u16,
+    pub len: u8,
     pub cycles: u8,
     pub addr: AddressingMode,
 }
@@ -15,14 +15,14 @@ impl OpCode {
     pub fn new(
         op_code: u8,
         mnemonic: &'static str,
-        byte: u16,
+        len: u8,
         cycles: u8,
         addr: AddressingMode,
     ) -> Self {
         OpCode {
             op_code,
             mnemonic,
-            byte,
+            len,
             cycles,
             addr,
         }

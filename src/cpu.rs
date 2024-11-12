@@ -156,8 +156,7 @@ impl CPU {
     }
 
     fn beq(&mut self) {
-        let is_zero_set = ((self.status & 0b0000_0010) >> 1) == 1;
-        self.jump_to_branch(is_zero_set);
+        self.jump_to_branch(((self.status & 0b0000_0010) >> 1) == 1);
     }
 
     fn bit(&mut self, mode: &AddressingMode) {
@@ -175,23 +174,23 @@ impl CPU {
     }
 
     fn bmi(&mut self) {
-        self.jump_to_branch(self.status >> 7 == 1);
+        self.jump_to_branch(((self.status & 0b1000_0000) >> 7) == 1);
     }
 
     fn bne(&mut self) {
-        self.jump_to_branch(self.status >> 1 == 0);
+        self.jump_to_branch(((self.status & 0b0000_0010) >> 1) == 0);
     }
 
     fn bpl(&mut self) {
-        self.jump_to_branch(self.status >> 7 == 0);
+        self.jump_to_branch(((self.status & 0b1000_0000) >> 7) == 0);
     }
 
     fn bvc(&mut self) {
-        self.jump_to_branch(self.status >> 6 == 0);
+        self.jump_to_branch(((self.status & 0b0100_0000) >> 6) == 0);
     }
 
     fn bvs(&mut self) {
-        self.jump_to_branch(self.status >> 6 == 1);
+        self.jump_to_branch(((self.status & 0b0100_0000) >> 6) == 1);
     }
 
     fn clc(&mut self) {
@@ -379,10 +378,7 @@ impl CPU {
     }
 
     fn php(&mut self) {
-        let mut status = self.status.clone();
-
-        status = status | 0b0011_0000;
-        self.stack_push(status);
+        self.stack_push(self.status | 0b0011_0000);
     }
 
     fn pla(&mut self) {
@@ -651,15 +647,16 @@ impl CPU {
     pub fn reset(&mut self) {
         self.register_a = 0;
         self.register_x = 0;
-        self.status = 0b0011_0000;
+        self.register_y = 0;
+        self.status = 0;
         self.stack_pointer = STACK_RESET;
 
         self.program_counter = self.mem_read_u16(0xFFFC);
     }
 
     pub fn load(&mut self, program: Vec<u8>) {
-        self.memory[0x8000..(0x8000 + program.len())].copy_from_slice(&program[..]);
-        self.mem_write_u16(0xFFFC, 0x8000);
+        self.memory[0x0600..(0x0600 + program.len())].copy_from_slice(&program[..]);
+        self.mem_write_u16(0xFFFC, 0x0600);
     }
 
     pub fn load_and_run(&mut self, program: Vec<u8>) {
@@ -686,6 +683,11 @@ impl CPU {
             let instruction = opcodes
                 .get(&opscode)
                 .expect(&format!("OpCode {:x} is not recognized", opscode));
+
+            println!(
+                "Instruction: {}, OpCode: {:#04x}, CPU Status: {:08b}, PC: {}",
+                instruction.mnemonic, instruction.op_code, self.status, self.program_counter
+            );
 
             match instruction.mnemonic {
                 "ADC" => {
@@ -934,7 +936,7 @@ impl CPU {
             }
 
             if program_counter_state == self.program_counter {
-                self.program_counter += (instruction.byte - 1) as u16;
+                self.program_counter += (instruction.len - 1) as u16;
             }
 
             callback(self);
@@ -1225,5 +1227,40 @@ mod test {
         cpu.load_and_run(vec![0x4C, 0x10, 0x00, 0x00]); // JMP $0010 BRK
 
         assert_eq!(cpu.program_counter, 0x0011);
+    }
+
+    #[test]
+    fn test_clc_clear_carry_flag() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0x38, 0x18, 0x00]); // SEC (Set Carry), CLC (Clear Carry), BRK
+        assert_eq!(cpu.status & 0b0000_0001, 0); // Ensure Carry Flag is clear
+    }
+
+    #[test]
+    fn test_cld_clear_decimal_mode() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xf8, 0xd8, 0x00]); // SED (Set Decimal), CLD (Clear Decimal), BRK
+        assert_eq!(cpu.status & 0b0000_1000, 0); // Ensure Decimal Mode is clear
+    }
+
+    #[test]
+    fn test_cli_clear_interrupt_disable() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0x78, 0x58, 0x00]); // SEI (Set Interrupt Disable), CLI (Clear Interrupt), BRK
+        assert_eq!(cpu.status & 0b0000_0100, 0); // Ensure Interrupt Disable is clear
+    }
+
+    #[test]
+    fn test_clv_clear_overflow_flag() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa9, 0x50, 0x69, 0x50, 0xb8, 0x00]); // LDA #$50, ADC #$50 (sets overflow), CLV, BRK
+        assert_eq!(cpu.status & 0b0100_0000, 0); // Ensure Overflow Flag is clear
+    }
+
+    #[test]
+    fn test_pha_push_a() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa9, 0x42, 0x48, 0x00]); // LDA #$42, PHA, BRK
+        assert_eq!(cpu.stack_pop(), 0x42); // Verify value at top of stack
     }
 }
