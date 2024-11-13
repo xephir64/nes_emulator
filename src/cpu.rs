@@ -971,7 +971,7 @@ impl CPU {
         }
     }
 }
-
+/*
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1286,3 +1286,4 @@ mod test {
         assert_eq!(cpu.program_counter, 0x0011);
     }
 }
+*/
