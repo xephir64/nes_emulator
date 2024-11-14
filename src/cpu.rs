@@ -683,13 +683,13 @@ impl CPU {
         for i in 0..(program.len() as u16) {
             self.mem_write(0x0600 + i, program[i as usize]);
         }
-
-        self.mem_write_u16(0xFFFC, 0x0600);
+        // self.mem_write_u16(0xFFFC, 0x0600);
     }
 
     pub fn load_and_run(&mut self, program: Vec<u8>) {
         self.load(program);
         self.reset();
+        self.program_counter = 0x600;
         self.run()
     }
 
@@ -712,10 +712,10 @@ impl CPU {
                 .get(&opscode)
                 .expect(&format!("OpCode {:x} is not recognized", opscode));
 
-            println!(
+            /*println!(
                 "Instruction: {}, OpCode: {:#04x}, CPU Status: {:08b}, PC: {}",
                 instruction.mnemonic, instruction.op_code, self.status, self.program_counter
-            );
+            );*/
 
             match instruction.mnemonic {
                 "ADC" => {
@@ -971,14 +971,16 @@ impl CPU {
         }
     }
 }
-/*
+
 #[cfg(test)]
 mod test {
+    use crate::rom::test;
+
     use super::*;
 
     #[test]
     fn test_0xa9_lda_immediate_load_data() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xa9, 0x05, 0x00]);
         assert_eq!(cpu.register_a, 0x05);
@@ -988,7 +990,7 @@ mod test {
 
     #[test]
     fn test_0xa9_lda_zero_flag() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xa9, 0x00, 0x00]);
         assert!(cpu.status & 0b0000_0010 == 0b10);
@@ -996,7 +998,7 @@ mod test {
 
     #[test]
     fn test_0xaa_tax_move_a_to_x() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xa9, 0x0a, 0xaa, 0x00]);
 
@@ -1005,7 +1007,7 @@ mod test {
 
     #[test]
     fn test_5_ops_working_together() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xa9, 0xc0, 0xaa, 0xe8, 0x00]);
 
@@ -1014,7 +1016,7 @@ mod test {
 
     #[test]
     fn test_inx_overflow() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xa9, 0xff, 0xaa, 0xe8, 0xe8, 0x00]);
 
@@ -1023,7 +1025,7 @@ mod test {
 
     #[test]
     fn test_lda_from_memory() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.mem_write(0x10, 0x55);
 
@@ -1034,7 +1036,7 @@ mod test {
 
     #[test]
     fn test_adc_immediate_basic_addition() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.register_a = 0x05;
         cpu.load_and_run(vec![0xA9, 0x05, 0x69, 0x03, 0x00]); // LDA #$05 ADC #$03 BRK
@@ -1047,7 +1049,7 @@ mod test {
 
     #[test]
     fn test_adc_with_carry_set() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0xFF, 0x69, 0x01, 0xA9, 0x05, 0x69, 0x03, 0x00]); // LDA #$FF ADC #$01 LDA #$05 ADC #$03 BRK
 
@@ -1057,7 +1059,7 @@ mod test {
 
     #[test]
     fn test_adc_overflow() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x50, 0x69, 0x50, 0x00]); // LDA #$50 ADC #$50 BRK
 
@@ -1068,7 +1070,7 @@ mod test {
 
     #[test]
     fn test_and() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x11, 0x29, 0x10, 0x00]); // LDA $#11 AND $#10 BRK
 
@@ -1079,7 +1081,7 @@ mod test {
 
     #[test]
     fn test_and_negative_flag() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0xCC, 0x29, 0xAA, 0x00]); // LDA #$CC AND #$AA BRK
 
@@ -1090,7 +1092,7 @@ mod test {
 
     #[test]
     fn test_asl_accumulator() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x4D, 0x0A, 0x00]); // LDA #$4D ASL BRK
 
@@ -1102,7 +1104,7 @@ mod test {
 
     #[test]
     fn test_asl_zero_page() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.mem_write(0x10, 0x81);
         cpu.load_and_run(vec![0x06, 0x10, 0x00]); // ASL $10 BRK
@@ -1115,7 +1117,7 @@ mod test {
 
     #[test]
     fn test_0x24_bit_zero_flag_set() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.mem_write(0x10, 0x92); // 0b1001_0010 so negative should be set
         cpu.load_and_run(vec![0xA9, 0x00, 0x24, 0x10, 0x00]); // LDA #$00, BIT $10 BRK
@@ -1127,7 +1129,7 @@ mod test {
 
     #[test]
     fn test_0x24_bit_zero_flag_clear() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.mem_write(0x10, 0x01); // 0b0000_0001
         cpu.load_and_run(vec![0xA9, 0x01, 0x24, 0x10, 0x00]); // LDA #$01, BIT $10 BRK
@@ -1139,7 +1141,7 @@ mod test {
 
     #[test]
     fn test_sbc_immediate_basic_subtraction() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x10, 0xE9, 0x05, 0x00]); // LDA #$10 SBC #$05 BRK
 
@@ -1151,7 +1153,7 @@ mod test {
 
     #[test]
     fn test_sbc_with_borrow() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x05, 0xE9, 0x10, 0x00]); // LDA #$05 SBC #$10 BRK
 
@@ -1163,7 +1165,7 @@ mod test {
 
     #[test]
     fn test_sbc() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x05, 0xE9, 0x05, 0x00]); // LDA #$05 SBC #$05 BRK
 
@@ -1175,7 +1177,7 @@ mod test {
 
     #[test]
     fn test_ora() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x12, 0x09, 0x08, 0x00]); // LDA #$12 ORA #$08 BRK
 
@@ -1184,7 +1186,7 @@ mod test {
 
     #[test]
     fn test_eor() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x15, 0x49, 0x0F, 0x00]); // LDA #$15 EOR #$0F BRK
 
@@ -1193,7 +1195,7 @@ mod test {
 
     #[test]
     fn test_cmp_equal() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x05, 0xC9, 0x05, 0x00]); // LDA #$05 CMP #$05 BRK
 
@@ -1204,7 +1206,7 @@ mod test {
 
     #[test]
     fn test_lsr_accumulator() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x02, 0x4A, 0x00]); // LDA #$02 LSR BRK
 
@@ -1215,7 +1217,7 @@ mod test {
 
     #[test]
     fn test_lsr_zero_page() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.mem_write(0x10, 0x01);
         cpu.load_and_run(vec![0x46, 0x10, 0x00]); // LSR $10 BRK
@@ -1227,7 +1229,7 @@ mod test {
 
     #[test]
     fn test_rol_accumulator() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xa9, 0x81, 0x2A, 0x00]); // LDA #$81 ROL BRK
 
@@ -1238,7 +1240,7 @@ mod test {
 
     #[test]
     fn test_rol_with_carry_in() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0x38, 0xA9, 0x40, 0x2A, 0x00]); // SEC LDA #$40 ROL BRK
 
@@ -1248,7 +1250,7 @@ mod test {
 
     #[test]
     fn test_ror_accumulator() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xa9, 0x01, 0x6a, 0x00]); // LDA #$01 ROR BRK
 
@@ -1259,7 +1261,7 @@ mod test {
 
     #[test]
     fn test_ror_with_carry_in() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0x38, 0xa9, 0x02, 0x6A, 0x00]); // SEC LDA #$02 ROR BRK
 
@@ -1270,7 +1272,7 @@ mod test {
 
     #[test]
     fn test_pha_pla() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x45, 0x48, 0xA9, 0x00, 0x68, 0x00]); // LDA #$45 PHA LDA #$00 PLA BRK
 
@@ -1279,11 +1281,10 @@ mod test {
 
     #[test]
     fn test_jmp_absolute() {
-        let bus = Bus::new();
+        let bus = Bus::new(test::test_rom());
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0x4C, 0x10, 0x00, 0x00]); // JMP $0010 BRK
 
         assert_eq!(cpu.program_counter, 0x0011);
     }
 }
-*/

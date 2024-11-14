@@ -18,6 +18,7 @@ pub mod bus;
 pub mod cpu;
 pub mod opcode;
 pub mod rom;
+pub mod trace;
 
 extern crate lazy_static;
 
@@ -126,11 +127,13 @@ fn main() {
     let mut cpu = CPU::new(bus);
 
     cpu.reset();
+    cpu.program_counter = 0xC000;
 
     let mut screen_state = [0 as u8; 32 * 3 * 32];
     let mut rng = rand::thread_rng();
 
     cpu.run_with_callback(move |cpu| {
+        println!("{}", trace::trace(cpu));
         handle_user_input(cpu, &mut event_pump);
         cpu.mem_write(0xfe, rng.gen_range(1..16));
 
