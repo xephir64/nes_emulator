@@ -7,6 +7,7 @@ use crate::{
 
 const STACK: u16 = 0x0100;
 const STACK_RESET: u8 = 0xfd;
+const CPU_STATE_RESET: u8 = 0b0010_0100;
 
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
@@ -57,7 +58,7 @@ impl CPU {
             register_a: 0,
             register_x: 0,
             register_y: 0,
-            status: 0,
+            status: CPU_STATE_RESET,
             program_counter: 0,
             stack_pointer: STACK_RESET,
             bus,
@@ -72,7 +73,7 @@ impl CPU {
         self.bus.mem_write(addr, data)
     }
 
-    fn mem_read_u16(&mut self, pos: u16) -> u16 {
+    pub fn mem_read_u16(&self, pos: u16) -> u16 {
         let lo = self.mem_read(pos) as u16;
         let hi = self.mem_read(pos + 1) as u16;
         (hi << 8) | (lo as u16)
@@ -670,7 +671,7 @@ impl CPU {
         self.register_a = 0;
         self.register_x = 0;
         self.register_y = 0;
-        self.status = 0;
+        self.status = CPU_STATE_RESET;
         self.stack_pointer = STACK_RESET;
 
         self.program_counter = self.mem_read_u16(0xFFFC);
@@ -704,6 +705,7 @@ impl CPU {
         let ref opcodes: HashMap<u8, &'static opcode::OpCode> = *opcode::OPCODES_MAP;
 
         loop {
+            callback(self);
             let opscode = self.mem_read(self.program_counter);
             self.program_counter += 1;
             let program_counter_state = self.program_counter;
@@ -966,8 +968,6 @@ impl CPU {
             if program_counter_state == self.program_counter {
                 self.program_counter += (instruction.len - 1) as u16;
             }
-
-            callback(self);
         }
     }
 }
