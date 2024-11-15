@@ -76,7 +76,9 @@ pub fn trace(cpu: &CPU) -> String {
             let addr = cpu.mem_read(pc + 1);
             hex_dump = format!("{:04X}  {:02X} {:02X}     ", pc, code, addr);
             asm_dump = match instruction.addr {
-                AddressingMode::NoneAddressing => format!("{}", instruction.mnemonic),
+                AddressingMode::NoneAddressing => {
+                    format!("{} ${:04X}", instruction.mnemonic, (pc + addr as u16 + 2))
+                }
                 AddressingMode::Immediate => format!("{} #${:02X}", instruction.mnemonic, addr),
                 AddressingMode::ZeroPage => {
                     let mem_addr = get_absolute_address(cpu, &instruction.addr, pc + 1);
@@ -149,17 +151,26 @@ pub fn trace(cpu: &CPU) -> String {
                 AddressingMode::Absolute => {
                     let mem_addr = get_absolute_address(cpu, &instruction.addr, pc + 1);
                     let stored_value = cpu.mem_read(mem_addr);
-                    format!("${:04X} = {:02X}", mem_addr, stored_value)
+                    format!(
+                        "{} ${:04X} = {:02X}",
+                        instruction.mnemonic, mem_addr, stored_value
+                    )
                 }
                 AddressingMode::Absolute_X => {
                     let mem_addr = get_absolute_address(cpu, &instruction.addr, pc + 1);
                     let stored_value = cpu.mem_read(mem_addr);
-                    format!("${:04X},X @ {:04X} = {:02X}", addr, mem_addr, stored_value)
+                    format!(
+                        "{} ${:04X},X @ {:04X} = {:02X}",
+                        instruction.mnemonic, addr, mem_addr, stored_value
+                    )
                 }
                 AddressingMode::Absolute_Y => {
                     let mem_addr = get_absolute_address(cpu, &instruction.addr, pc + 1);
                     let stored_value = cpu.mem_read(mem_addr);
-                    format!("${:04X},Y @ {:04X} = {:02X}", addr, mem_addr, stored_value)
+                    format!(
+                        "{} ${:04X},Y @ {:04X} = {:02X}",
+                        instruction.mnemonic, addr, mem_addr, stored_value
+                    )
                 }
                 _ => panic!(
                     "Unsupported addressing mode 3 for instruction {}",
@@ -170,15 +181,15 @@ pub fn trace(cpu: &CPU) -> String {
         _ => panic!("Unexpected instruction length"),
     }
 
-    let a = cpu.register_a;
-    let x = cpu.register_x;
-    let y = cpu.register_y;
-    let p = cpu.status;
-    let sp = cpu.stack_pointer;
-
     format!(
         "{}{:<31} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
-        hex_dump, asm_dump, a, x, y, p, sp
+        hex_dump,
+        asm_dump,
+        cpu.register_a,
+        cpu.register_x,
+        cpu.register_y,
+        cpu.status,
+        cpu.stack_pointer
     )
 }
 
