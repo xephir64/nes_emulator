@@ -126,7 +126,7 @@ impl CPU {
         let addr = self.get_operand_address(mode);
         let value_1 = self.register_a;
         let value_2 = self.mem_read(addr);
-        let carry = self.status & 0b0000_0001;
+        let carry = self.status & 1;
 
         let sum = value_1 as u16 + value_2 as u16 + carry as u16;
 
@@ -169,17 +169,17 @@ impl CPU {
     }
 
     fn bcc(&mut self) {
-        let is_carry_flag = self.status & 0b0000_0001 == 0;
+        let is_carry_flag = self.status & 1 == 0;
         self.jump_to_branch(is_carry_flag);
     }
 
     fn bcs(&mut self) {
-        let is_carry_flag = self.status & 0b0000_0001 == 1;
+        let is_carry_flag = self.status & 1 == 1;
         self.jump_to_branch(is_carry_flag);
     }
 
     fn beq(&mut self) {
-        self.jump_to_branch(((self.status & 0b0000_0010) >> 1) == 1);
+        self.jump_to_branch((self.status >> 1) & 1 == 1);
     }
 
     fn bit(&mut self, mode: &AddressingMode) {
@@ -192,28 +192,28 @@ impl CPU {
             self.status = self.status & 0b1111_1101;
         }
 
-        self.update_overflow_flag(mem_val >> 6 == 1);
-        self.update_negative_flag(mem_val >> 7 == 1);
+        self.update_overflow_flag((mem_val >> 6) & 1 == 1);
+        self.update_negative_flag((mem_val >> 7) & 1 == 1);
     }
 
     fn bmi(&mut self) {
-        self.jump_to_branch(((self.status & 0b1000_0000) >> 7) == 1);
+        self.jump_to_branch((self.status >> 7) & 1 == 1);
     }
 
     fn bne(&mut self) {
-        self.jump_to_branch(((self.status & 0b0000_0010) >> 1) == 0);
+        self.jump_to_branch((self.status >> 1) & 1 == 0);
     }
 
     fn bpl(&mut self) {
-        self.jump_to_branch(((self.status & 0b1000_0000) >> 7) == 0);
+        self.jump_to_branch((self.status >> 7) & 1 == 0);
     }
 
     fn bvc(&mut self) {
-        self.jump_to_branch(((self.status & 0b0100_0000) >> 6) == 0);
+        self.jump_to_branch((self.status >> 6) & 1 == 0);
     }
 
     fn bvs(&mut self) {
-        self.jump_to_branch(((self.status & 0b0100_0000) >> 6) == 1);
+        self.jump_to_branch((self.status >> 6) & 1 == 1);
     }
 
     fn clc(&mut self) {
@@ -494,7 +494,7 @@ impl CPU {
         let addr = self.get_operand_address(mode);
         let a = self.register_a;
         let m = self.mem_read(addr);
-        let carry = self.status & 0b0000_0001;
+        let carry = self.status & 1;
 
         let sub = (m as i8).wrapping_neg().wrapping_sub(1) as u8; // -B = !B - 1
 
@@ -503,7 +503,7 @@ impl CPU {
         let enable_carry = sum > 255;
 
         let result = sum as u8;
-        let is_overflow = (m ^ result) & (result ^ self.register_a) & 0x80 != 0;
+        let is_overflow = (sub ^ result) & (result ^ self.register_a) & 0x80 != 0;
 
         self.register_a = sum as u8;
         self.update_carry_flag(enable_carry);
@@ -526,22 +526,16 @@ impl CPU {
     fn sta(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         self.mem_write(addr, self.register_a);
-
-        self.update_zero_and_negative_flags(self.register_a);
     }
 
     fn stx(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         self.mem_write(addr, self.register_x);
-
-        self.update_zero_and_negative_flags(self.register_x);
     }
 
     fn sty(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         self.mem_write(addr, self.register_y);
-
-        self.update_zero_and_negative_flags(self.register_y);
     }
 
     fn tax(&mut self) {
