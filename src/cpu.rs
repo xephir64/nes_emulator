@@ -566,6 +566,14 @@ impl CPU {
         self.register_a = self.register_y;
     }
 
+    // Unofficial instructions
+
+    fn sax(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let result = self.register_x & self.register_a;
+        self.mem_write(addr, result);
+    }
+
     fn update_carry_flag(&mut self, enable: bool) {
         if enable {
             self.status = self.status | 0b0000_0001;
@@ -954,6 +962,52 @@ impl CPU {
 
                 "BRK" => {
                     return;
+                }
+
+                // Undocumented Instructions
+                "*DCP" => {
+                    self.dec(&instruction.addr);
+                    self.cmp(&instruction.addr);
+                }
+
+                "*ISB" => {
+                    self.inc(&instruction.addr);
+                    self.sbc(&instruction.addr);
+                }
+
+                "*LAX" => {
+                    self.lda(&instruction.addr);
+                    self.ldx(&instruction.addr);
+                }
+
+                "*NOP" => {}
+
+                "*RLA" => {
+                    self.rol(&instruction.addr);
+                    self.and(&instruction.addr);
+                }
+
+                "*RRA" => {
+                    self.ror(&instruction.addr);
+                    self.adc(&instruction.addr);
+                }
+
+                "*SAX" => {
+                    self.sax(&instruction.addr);
+                }
+
+                "*SBC" => {
+                    self.sbc(&instruction.addr);
+                }
+
+                "*SLO" => {
+                    self.asl(&instruction.addr);
+                    self.ora(&instruction.addr);
+                }
+
+                "*SRE" => {
+                    self.lsr(&instruction.addr);
+                    self.eor(&instruction.addr);
                 }
 
                 _ => todo!(),
