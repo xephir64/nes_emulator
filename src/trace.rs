@@ -69,12 +69,20 @@ pub fn trace(cpu: &CPU) -> String {
 
     match instruction.len {
         1 => {
-            hex_dump = format!("{:04X}  {:02X}        ", pc, code);
+            hex_dump = if instruction.mnemonic.contains("*") {
+                format!("{:04X}  {:02X}       ", pc, code)
+            } else {
+                format!("{:04X}  {:02X}        ", pc, code)
+            };
             asm_dump = format!("{}", instruction.mnemonic);
         }
         2 => {
             let addr = cpu.mem_read(pc + 1);
-            hex_dump = format!("{:04X}  {:02X} {:02X}     ", pc, code, addr);
+            hex_dump = if instruction.mnemonic.contains("*") {
+                format!("{:04X}  {:02X} {:02X}    ", pc, code, addr)
+            } else {
+                format!("{:04X}  {:02X} {:02X}     ", pc, code, addr)
+            };
             asm_dump = match instruction.addr {
                 AddressingMode::NoneAddressing => {
                     format!("{} ${:04X}", instruction.mnemonic, (pc + addr as u16 + 2))
@@ -139,7 +147,11 @@ pub fn trace(cpu: &CPU) -> String {
             let high = cpu.mem_read(pc + 2);
             let addr = cpu.mem_read_u16(pc + 1);
 
-            hex_dump = format!("{:04X}  {:02X} {:02X} {:02X}  ", pc, code, low, high);
+            hex_dump = if instruction.mnemonic.contains("*") {
+                format!("{:04X}  {:02X} {:02X} {:02X} ", pc, code, low, high)
+            } else {
+                format!("{:04X}  {:02X} {:02X} {:02X}  ", pc, code, low, high)
+            };
             asm_dump = match instruction.addr {
                 AddressingMode::NoneAddressing => {
                     format!(
@@ -182,9 +194,14 @@ pub fn trace(cpu: &CPU) -> String {
     }
 
     format!(
-        "{}{:<31} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
+        "{}{:<31} {}A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
         hex_dump,
         asm_dump,
+        if instruction.mnemonic.contains("*") {
+            " "
+        } else {
+            ""
+        },
         cpu.register_a,
         cpu.register_x,
         cpu.register_y,
