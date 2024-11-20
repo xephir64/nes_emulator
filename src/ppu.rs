@@ -1,7 +1,8 @@
 use crate::{
     ppu_registers::{
         address_register::AddrRegister, control_register::ControlRegister,
-        scroll_register::ScrollRegister, status_register::StatusRegister,
+        mask_register::MaskRegister, scroll_register::ScrollRegister,
+        status_register::StatusRegister,
     },
     rom::Mirroring,
 };
@@ -17,6 +18,7 @@ pub struct NesPPU {
     pub status: StatusRegister,
     pub addr: AddrRegister,
     pub scroll: ScrollRegister,
+    pub mask: MaskRegister,
 
     pub oam_data: [u8; 256],
     pub oam_addr: u8,
@@ -37,8 +39,17 @@ impl NesPPU {
             addr: AddrRegister::new(),
             status: StatusRegister::new(),
             scroll: ScrollRegister::new(),
+            mask: MaskRegister::new(),
             internal_data_buf: 0,
         }
+    }
+    // private methods
+    fn increment_vram_addr(&mut self) {
+        self.addr.increment(self.ctrl.vram_addr_increment());
+    }
+
+    fn increment_oam_addr(&mut self) {
+        self.oam_addr = self.oam_addr.wrapping_add(1);
     }
 
     pub fn new_empty_rom() -> Self {
@@ -76,10 +87,6 @@ impl NesPPU {
             _ => panic!("unexpected access to mirrored space {}", addr),
         }
         self.increment_vram_addr();
-    }
-
-    fn increment_vram_addr(&mut self) {
-        self.addr.increment(self.ctrl.vram_addr_increment());
     }
 
     pub fn read_data(&mut self) -> u8 {
@@ -130,7 +137,7 @@ impl NesPPU {
         }
     }
 
-    fn read_status(&mut self) -> u8 {
+    pub fn read_status(&mut self) -> u8 {
         let data = self.status.snapshot();
         self.status.reset_vblank_status();
         self.addr.reset_latch();
@@ -138,27 +145,31 @@ impl NesPPU {
         data
     }
 
-    fn write_to_oam_addr(&mut self, value: u8) {
+    pub fn write_to_oam_addr(&mut self, value: u8) {
         self.oam_addr = value;
     }
 
-    fn increment_oam_addr(&mut self) {
-        self.oam_addr = self.oam_addr.wrapping_add(1);
-    }
-
-    fn write_to_oam_data(&mut self, value: u8) {
+    pub fn write_to_oam_data(&mut self, value: u8) {
         self.oam_data[self.oam_addr as usize] = value;
         self.increment_oam_addr();
     }
 
-    fn write_oam_dma(&mut self, data: &[u8; 256]) {
+    pub fn write_oam_dma(&mut self, data: &[u8; 256]) {
         for datum in data {
             self.oam_data[self.oam_addr as usize] = *datum;
             self.increment_oam_addr();
         }
     }
 
-    fn read_oam_data(&mut self) -> u8 {
+    pub fn read_oam_data(&mut self) -> u8 {
         self.oam_data[self.oam_addr as usize]
+    }
+
+    pub fn write_to_scroll(&mut self, data: u8) {
+        self.scroll.write(data);
+    }
+
+    pub fn write_to_mask(&mut self, data: u8) {
+        self.mask.update(data);
     }
 }
