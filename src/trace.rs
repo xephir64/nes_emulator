@@ -5,7 +5,7 @@ use crate::{
     opcode,
 };
 
-pub fn get_absolute_address(cpu: &CPU, mode: &AddressingMode, addr: u16) -> u16 {
+pub fn get_absolute_address(cpu: &mut CPU, mode: &AddressingMode, addr: u16) -> u16 {
     match mode {
         AddressingMode::ZeroPage => cpu.mem_read(addr) as u16,
 
@@ -57,7 +57,7 @@ pub fn get_absolute_address(cpu: &CPU, mode: &AddressingMode, addr: u16) -> u16 
     }
 }
 
-pub fn trace(cpu: &CPU) -> String {
+pub fn trace(cpu: &mut CPU) -> String {
     let ref opcodes: HashMap<u8, &'static opcode::OpCode> = *opcode::OPCODES_MAP;
 
     let pc = cpu.program_counter;
