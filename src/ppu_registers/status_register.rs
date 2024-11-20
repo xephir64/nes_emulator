@@ -37,4 +37,12 @@ impl StatusRegister {
     pub fn set_vblank_status(&mut self, condition: bool) {
         self.set(StatusRegister::VBLANK_FLAG, condition);
     }
+
+    pub fn set_sprite_overflow_status(&mut self, condition: bool) {
+        self.set(StatusRegister::SPRITE_OVERFLOW_FLAG, condition);
+    }
+
+    pub fn set_sprite_zero_hit_status(&mut self, condition: bool) {
+        self.set(StatusRegister::SPRITE_ZERO_HIT_FLAG, condition);
+    }
 }

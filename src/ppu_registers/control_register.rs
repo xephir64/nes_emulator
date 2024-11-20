@@ -45,6 +45,6 @@ impl ControlRegister {
 
     pub fn update(&mut self, data: u8) {
         // self.bits = data;
-        Self::from_bits_retain(data);
+        *self = ControlRegister::from_bits_retain(data);
     }
 }
