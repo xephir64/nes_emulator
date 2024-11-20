@@ -1,4 +1,4 @@
-use bitflags::{bitflags, Flags};
+use bitflags::bitflags;
 
 bitflags! {
     // 7  bit  0
@@ -25,6 +25,11 @@ bitflags! {
         const EMPHASIZE_GREEN = 0b0100_0000;
         const EMPHASIZE_BLUE = 0b1000_0000;
     }
+}
+pub enum Color {
+    Red,
+    Green,
+    Blue,
 }
 
 impl MaskRegister {
@@ -54,5 +59,20 @@ impl MaskRegister {
 
     pub fn update(&mut self, data: u8) {
         *self = MaskRegister::from_bits_retain(data);
+    }
+
+    pub fn emphasise(&self) -> Vec<Color> {
+        let mut result = Vec::<Color>::new();
+        if self.contains(MaskRegister::EMPHASIZE_RED) {
+            result.push(Color::Red);
+        }
+        if self.contains(MaskRegister::EMPHASIZE_BLUE) {
+            result.push(Color::Blue);
+        }
+        if self.contains(MaskRegister::EMPHASIZE_GREEN) {
+            result.push(Color::Green);
+        }
+
+        result
     }
 }

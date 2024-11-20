@@ -27,7 +27,7 @@ impl StatusRegister {
     }
 
     pub fn snapshot(&self) -> u8 {
-        return self.bits();
+        self.bits()
     }
 
     pub fn reset_vblank_status(&mut self) {
