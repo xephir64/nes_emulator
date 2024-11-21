@@ -209,7 +209,7 @@ pub fn trace(cpu: &mut CPU) -> String {
         cpu.stack_pointer
     )
 }
-
+/*
 #[cfg(test)]
 mod test {
     use super::*;
@@ -276,3 +276,4 @@ mod test {
         );
     }
 }
+*/

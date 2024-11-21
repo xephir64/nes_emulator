@@ -8,6 +8,7 @@ use crate::{
 const STACK: u16 = 0x0100;
 const STACK_RESET: u8 = 0xfd;
 const CPU_STATE_RESET: u8 = 0b0010_0100;
+const MEM_PAGE_SIZE: u16 = 0x100;
 
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
@@ -23,14 +24,14 @@ pub enum AddressingMode {
     Indirect_Y,
     NoneAddressing,
 }
-pub struct CPU {
+pub struct CPU<'a> {
     pub register_a: u8,
     pub register_x: u8,
     pub register_y: u8,
     pub status: u8,
     pub program_counter: u16,
     pub stack_pointer: u8,
-    pub bus: Bus,
+    pub bus: Bus<'a>,
 }
 
 pub trait Mem {
@@ -52,8 +53,8 @@ pub trait Mem {
     }
 }
 
-impl CPU {
-    pub fn new(bus: Bus) -> Self {
+impl<'a> CPU<'a> {
+    pub fn new(bus: Bus<'a>) -> Self {
         CPU {
             register_a: 0,
             register_x: 0,
@@ -112,14 +113,32 @@ impl CPU {
 
     fn jump_to_branch(&mut self, condition: bool) {
         if condition {
+            self.bus.tick(1);
             let jump = self.mem_read(self.program_counter) as i8;
             let jump_addr = self
                 .program_counter
                 .wrapping_add(1)
                 .wrapping_add(jump as u16);
 
+            // compare pc to jump addr to see if it's on a new page
+            if (self.program_counter.wrapping_add(1) / MEM_PAGE_SIZE) == (jump_addr / MEM_PAGE_SIZE)
+            {
+                self.bus.tick(1);
+            }
+
             self.program_counter = jump_addr;
         }
+    }
+
+    fn detect_page_cross(&mut self, mode: &AddressingMode) -> bool {
+        let actual_addr = self.program_counter;
+        let next_addr = self.get_operand_address(mode);
+        return match mode {
+            AddressingMode::Absolute_X => actual_addr / MEM_PAGE_SIZE != next_addr / MEM_PAGE_SIZE,
+            AddressingMode::Absolute_Y => actual_addr / MEM_PAGE_SIZE != next_addr / MEM_PAGE_SIZE,
+            AddressingMode::Indirect_Y => actual_addr / MEM_PAGE_SIZE != next_addr / MEM_PAGE_SIZE,
+            _ => false,
+        };
     }
 
     fn adc(&mut self, mode: &AddressingMode) {
@@ -139,6 +158,10 @@ impl CPU {
         self.update_carry_flag(enable_carry);
         self.update_overflow_flag(is_overflow);
         self.update_zero_and_negative_flags(self.register_a);
+
+        if self.detect_page_cross(mode) {
+            self.bus.tick(1);
+        }
     }
 
     fn and(&mut self, mode: &AddressingMode) {
@@ -149,6 +172,10 @@ impl CPU {
         self.register_a = a & m;
 
         self.update_zero_and_negative_flags(self.register_a);
+
+        if self.detect_page_cross(mode) {
+            self.bus.tick(1);
+        }
     }
 
     fn asl_accumulator(&mut self) {
@@ -242,6 +269,10 @@ impl CPU {
             self.update_carry_flag(false);
         }
 
+        if self.detect_page_cross(mode) {
+            self.bus.tick(1);
+        }
+
         self.update_zero_and_negative_flags(self.register_a.wrapping_sub(value));
     }
 
@@ -298,6 +329,10 @@ impl CPU {
         self.register_a = a ^ m;
 
         self.update_zero_and_negative_flags(self.register_a);
+
+        if self.detect_page_cross(mode) {
+            self.bus.tick(1);
+        }
     }
 
     fn inc(&mut self, mode: &AddressingMode) {
@@ -349,6 +384,10 @@ impl CPU {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
 
+        if self.detect_page_cross(mode) {
+            self.bus.tick(1);
+        }
+
         self.register_a = value;
         self.update_zero_and_negative_flags(self.register_a);
     }
@@ -357,6 +396,15 @@ impl CPU {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
 
+        match mode {
+            AddressingMode::Absolute_Y => {
+                if self.program_counter / MEM_PAGE_SIZE != addr / MEM_PAGE_SIZE {
+                    self.bus.tick(1);
+                }
+            }
+            _ => {}
+        }
+
         self.register_x = value;
         self.update_zero_and_negative_flags(self.register_x);
     }
@@ -364,6 +412,15 @@ impl CPU {
     fn ldy(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
+
+        match mode {
+            AddressingMode::Absolute_X => {
+                if self.program_counter / MEM_PAGE_SIZE != addr / MEM_PAGE_SIZE {
+                    self.bus.tick(1);
+                }
+            }
+            _ => {}
+        }
 
         self.register_y = value;
         self.update_zero_and_negative_flags(self.register_y);
@@ -394,6 +451,10 @@ impl CPU {
         self.register_a = a | m;
 
         self.update_zero_and_negative_flags(self.register_a);
+
+        if self.detect_page_cross(mode) {
+            self.bus.tick(1);
+        }
     }
 
     fn pha(&mut self) {
@@ -504,6 +565,10 @@ impl CPU {
 
         let result = sum as u8;
         let is_overflow = (sub ^ result) & (result ^ self.register_a) & 0x80 != 0;
+
+        if self.detect_page_cross(mode) {
+            self.bus.tick(1);
+        }
 
         self.register_a = sum as u8;
         self.update_carry_flag(enable_carry);
@@ -700,6 +765,18 @@ impl CPU {
         self.run_with_callback(|_| {});
     }
 
+    fn interrupt_nmi(&mut self) {
+        self.stack_push_u16(self.program_counter);
+        self.status = self.status & 0b1110_1111; // unset BREAK
+        self.status = self.status | 0b0010_0000; // set BREAK 2
+
+        self.stack_push(self.status);
+        self.status = self.status | 0b0000_0100; // set interrupt mode
+
+        self.bus.tick(2);
+        self.program_counter = self.mem_read_u16(0xfffA);
+    }
+
     pub fn run_with_callback<F>(&mut self, mut callback: F)
     where
         F: FnMut(&mut CPU),
@@ -707,7 +784,12 @@ impl CPU {
         let ref opcodes: HashMap<u8, &'static opcode::OpCode> = *opcode::OPCODES_MAP;
 
         loop {
+            if let Some(_nmi) = self.bus.poll_nmi_status() {
+                self.interrupt_nmi();
+            }
+
             callback(self);
+
             let opscode = self.mem_read(self.program_counter);
             self.program_counter += 1;
             let program_counter_state = self.program_counter;
@@ -1013,6 +1095,8 @@ impl CPU {
                 _ => todo!(),
             }
 
+            self.bus.tick(instruction.cycles);
+
             if program_counter_state == self.program_counter {
                 self.program_counter += (instruction.len - 1) as u16;
             }
@@ -1022,13 +1106,13 @@ impl CPU {
 
 #[cfg(test)]
 mod test {
-    use crate::rom::test;
+    use crate::{ppu::NesPPU, rom::test};
 
     use super::*;
 
     #[test]
     fn test_0xa9_lda_immediate_load_data() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xa9, 0x05, 0x00]);
         assert_eq!(cpu.register_a, 0x05);
@@ -1038,7 +1122,7 @@ mod test {
 
     #[test]
     fn test_0xa9_lda_zero_flag() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xa9, 0x00, 0x00]);
         assert!(cpu.status & 0b0000_0010 == 0b10);
@@ -1046,7 +1130,7 @@ mod test {
 
     #[test]
     fn test_0xaa_tax_move_a_to_x() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xa9, 0x0a, 0xaa, 0x00]);
 
@@ -1055,7 +1139,7 @@ mod test {
 
     #[test]
     fn test_5_ops_working_together() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xa9, 0xc0, 0xaa, 0xe8, 0x00]);
 
@@ -1064,7 +1148,7 @@ mod test {
 
     #[test]
     fn test_inx_overflow() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xa9, 0xff, 0xaa, 0xe8, 0xe8, 0x00]);
 
@@ -1073,7 +1157,7 @@ mod test {
 
     #[test]
     fn test_lda_from_memory() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.mem_write(0x10, 0x55);
 
@@ -1084,7 +1168,7 @@ mod test {
 
     #[test]
     fn test_adc_immediate_basic_addition() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.register_a = 0x05;
         cpu.load_and_run(vec![0xA9, 0x05, 0x69, 0x03, 0x00]); // LDA #$05 ADC #$03 BRK
@@ -1097,7 +1181,7 @@ mod test {
 
     #[test]
     fn test_adc_with_carry_set() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0xFF, 0x69, 0x01, 0xA9, 0x05, 0x69, 0x03, 0x00]); // LDA #$FF ADC #$01 LDA #$05 ADC #$03 BRK
 
@@ -1107,7 +1191,7 @@ mod test {
 
     #[test]
     fn test_adc_overflow() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x50, 0x69, 0x50, 0x00]); // LDA #$50 ADC #$50 BRK
 
@@ -1118,7 +1202,7 @@ mod test {
 
     #[test]
     fn test_and() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x11, 0x29, 0x10, 0x00]); // LDA $#11 AND $#10 BRK
 
@@ -1129,7 +1213,7 @@ mod test {
 
     #[test]
     fn test_and_negative_flag() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0xCC, 0x29, 0xAA, 0x00]); // LDA #$CC AND #$AA BRK
 
@@ -1140,7 +1224,7 @@ mod test {
 
     #[test]
     fn test_asl_accumulator() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x4D, 0x0A, 0x00]); // LDA #$4D ASL BRK
 
@@ -1152,7 +1236,7 @@ mod test {
 
     #[test]
     fn test_asl_zero_page() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.mem_write(0x10, 0x81);
         cpu.load_and_run(vec![0x06, 0x10, 0x00]); // ASL $10 BRK
@@ -1165,7 +1249,7 @@ mod test {
 
     #[test]
     fn test_0x24_bit_zero_flag_set() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.mem_write(0x10, 0x92); // 0b1001_0010 so negative should be set
         cpu.load_and_run(vec![0xA9, 0x00, 0x24, 0x10, 0x00]); // LDA #$00, BIT $10 BRK
@@ -1177,7 +1261,7 @@ mod test {
 
     #[test]
     fn test_0x24_bit_zero_flag_clear() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.mem_write(0x10, 0x01); // 0b0000_0001
         cpu.load_and_run(vec![0xA9, 0x01, 0x24, 0x10, 0x00]); // LDA #$01, BIT $10 BRK
@@ -1189,7 +1273,7 @@ mod test {
 
     #[test]
     fn test_sbc_immediate_basic_subtraction() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x10, 0xE9, 0x05, 0x00]); // LDA #$10 SBC #$05 BRK
 
@@ -1201,7 +1285,7 @@ mod test {
 
     #[test]
     fn test_sbc_with_borrow() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x05, 0xE9, 0x10, 0x00]); // LDA #$05 SBC #$10 BRK
 
@@ -1213,7 +1297,7 @@ mod test {
 
     #[test]
     fn test_sbc() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x05, 0xE9, 0x05, 0x00]); // LDA #$05 SBC #$05 BRK
 
@@ -1225,7 +1309,7 @@ mod test {
 
     #[test]
     fn test_ora() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x12, 0x09, 0x08, 0x00]); // LDA #$12 ORA #$08 BRK
 
@@ -1234,7 +1318,7 @@ mod test {
 
     #[test]
     fn test_eor() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x15, 0x49, 0x0F, 0x00]); // LDA #$15 EOR #$0F BRK
 
@@ -1243,7 +1327,7 @@ mod test {
 
     #[test]
     fn test_cmp_equal() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x05, 0xC9, 0x05, 0x00]); // LDA #$05 CMP #$05 BRK
 
@@ -1254,7 +1338,7 @@ mod test {
 
     #[test]
     fn test_lsr_accumulator() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x02, 0x4A, 0x00]); // LDA #$02 LSR BRK
 
@@ -1265,7 +1349,7 @@ mod test {
 
     #[test]
     fn test_lsr_zero_page() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.mem_write(0x10, 0x01);
         cpu.load_and_run(vec![0x46, 0x10, 0x00]); // LSR $10 BRK
@@ -1277,7 +1361,7 @@ mod test {
 
     #[test]
     fn test_rol_accumulator() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xa9, 0x81, 0x2A, 0x00]); // LDA #$81 ROL BRK
 
@@ -1288,7 +1372,7 @@ mod test {
 
     #[test]
     fn test_rol_with_carry_in() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0x38, 0xA9, 0x40, 0x2A, 0x00]); // SEC LDA #$40 ROL BRK
 
@@ -1298,7 +1382,7 @@ mod test {
 
     #[test]
     fn test_ror_accumulator() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xa9, 0x01, 0x6a, 0x00]); // LDA #$01 ROR BRK
 
@@ -1309,7 +1393,7 @@ mod test {
 
     #[test]
     fn test_ror_with_carry_in() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0x38, 0xa9, 0x02, 0x6A, 0x00]); // SEC LDA #$02 ROR BRK
 
@@ -1320,7 +1404,7 @@ mod test {
 
     #[test]
     fn test_pha_pla() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0xA9, 0x45, 0x48, 0xA9, 0x00, 0x68, 0x00]); // LDA #$45 PHA LDA #$00 PLA BRK
 
@@ -1329,7 +1413,7 @@ mod test {
 
     #[test]
     fn test_jmp_absolute() {
-        let bus = Bus::new(test::test_rom());
+        let bus = Bus::new(test::test_rom(), |ppu: &NesPPU| {});
         let mut cpu = CPU::new(bus);
         cpu.load_and_run(vec![0x4C, 0x10, 0x00, 0x00]); // JMP $0010 BRK
 

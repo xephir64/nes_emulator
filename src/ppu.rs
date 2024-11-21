@@ -23,6 +23,10 @@ pub struct NesPPU {
     pub oam_data: [u8; 256],
     pub oam_addr: u8,
 
+    pub nmi_interrupt: Option<u8>,
+
+    scanline: u16,
+    cycles: usize,
     internal_data_buf: u8,
 }
 
@@ -40,7 +44,10 @@ impl NesPPU {
             status: StatusRegister::new(),
             scroll: ScrollRegister::new(),
             mask: MaskRegister::new(),
+            scanline: 0,
+            cycles: 0,
             internal_data_buf: 0,
+            nmi_interrupt: None,
         }
     }
     // private methods
@@ -52,6 +59,31 @@ impl NesPPU {
         self.oam_addr = self.oam_addr.wrapping_add(1);
     }
 
+    pub fn tick(&mut self, cycles: u8) -> bool {
+        self.cycles += cycles as usize;
+        if self.cycles >= 341 {
+            self.cycles = self.cycles - 341;
+            self.scanline += 1;
+
+            if self.scanline == 241 {
+                self.status.set_vblank_status(true);
+                self.status.set_sprite_zero_hit_status(false);
+                if self.ctrl.generate_vblank_nmi() {
+                    self.nmi_interrupt = Some(1);
+                }
+            }
+
+            if self.scanline >= 262 {
+                self.scanline = 0;
+                self.nmi_interrupt = None;
+                self.status.set_sprite_zero_hit_status(false);
+                self.status.reset_vblank_status();
+                return true;
+            }
+        }
+        return false;
+    }
+
     pub fn new_empty_rom() -> Self {
         NesPPU::new(vec![0; 2048], Mirroring::HORIZONTAL)
     }
@@ -61,7 +93,11 @@ impl NesPPU {
     }
 
     pub fn write_to_ctrl(&mut self, value: u8) {
+        let before_nmi_status = self.ctrl.generate_vblank_nmi();
         self.ctrl.update(value);
+        if !before_nmi_status && self.ctrl.generate_vblank_nmi() && self.status.is_in_vblank() {
+            self.nmi_interrupt = Some(1);
+        }
     }
 
     pub fn write_to_data(&mut self, value: u8) {

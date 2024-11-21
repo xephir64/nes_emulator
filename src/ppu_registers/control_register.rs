@@ -47,4 +47,24 @@ impl ControlRegister {
         // self.bits = data;
         *self = ControlRegister::from_bits_retain(data);
     }
+
+    pub fn generate_vblank_nmi(&mut self) -> bool {
+        self.contains(ControlRegister::GENERATE_NMI)
+    }
+
+    pub fn bknd_pattern_addr(&self) -> u16 {
+        if !self.contains(ControlRegister::BACKROUND_PATTERN_ADDR) {
+            0
+        } else {
+            0x1000
+        }
+    }
+
+    pub fn sprt_pattern_addr(&self) -> u16 {
+        if !self.contains(ControlRegister::SPRITE_PATTERN_ADDR) {
+            0
+        } else {
+            0x1000
+        }
+    }
 }
