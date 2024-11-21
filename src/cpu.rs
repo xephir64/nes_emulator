@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::{
     bus::Bus,
     opcode::{self},
+    trace::trace,
 };
 
 const STACK: u16 = 0x0100;
