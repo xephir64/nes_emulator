@@ -1,4 +1,4 @@
-use crate::{cpu::Mem, ppu::NesPPU, rom::Rom};
+use crate::{cpu::Mem, joypad::Joypad, ppu::NesPPU, rom::Rom};
 
 const RAM: u16 = 0x0000;
 const RAM_MIRRORS_END: u16 = 0x1FFF;
@@ -13,13 +13,14 @@ pub struct Bus<'call> {
     ppu: NesPPU,
 
     cycles: usize,
-    gameloop_callback: Box<dyn FnMut(&NesPPU) + 'call>,
+    gameloop_callback: Box<dyn FnMut(&NesPPU, &mut Joypad) + 'call>,
+    joypad: Joypad,
 }
 
 impl<'a> Bus<'a> {
     pub fn new<'call, F>(rom: Rom, gameloop_callback: F) -> Bus<'call>
     where
-        F: FnMut(&NesPPU) + 'call,
+        F: FnMut(&NesPPU, &mut Joypad) + 'call,
     {
         let ppu = NesPPU::new(rom.chr_rom, rom.screen_mirroring);
 
@@ -29,6 +30,7 @@ impl<'a> Bus<'a> {
             ppu: ppu,
             cycles: 0,
             gameloop_callback: Box::from(gameloop_callback),
+            joypad: Joypad::new(),
         }
     }
 
@@ -49,7 +51,7 @@ impl<'a> Bus<'a> {
         let nmi_after = self.ppu.nmi_interrupt.is_some();
 
         if !nmi_before && nmi_after {
-            (self.gameloop_callback)(&self.ppu);
+            (self.gameloop_callback)(&self.ppu, &mut self.joypad);
         }
     }
 
@@ -88,10 +90,7 @@ impl<'a> Mem for Bus<'a> {
                 0
             }
 
-            0x4016 => {
-                // ignore joypad 1;
-                0
-            }
+            0x4016 => self.joypad.read(),
 
             0x4017 => {
                 // ignore joypad 2
@@ -160,9 +159,7 @@ impl<'a> Mem for Bus<'a> {
                 // self.tick(add_cycles); //todo this will cause weird effects as PPU will have 513/514 * 3 ticks
             }
 
-            0x4016 => {
-                // ignore joypad 1;
-            }
+            0x4016 => self.joypad.write(data),
 
             0x4017 => {
                 // ignore joypad 2;
