@@ -2,13 +2,15 @@
 
 ## State of the implementation
 
-- CPU shloud be OK
-- PPU have a basic support
-- Joypad is working
+### Working
 
-## TODO
+- CPU
+- PPU (basic support)
+- Joypad
 
-- APU
+### TODO
+
+- APU (+ IRQ)
 - Make advanced PPU 
 - Support for iNES 2 ROM
 - Make a basic interface (Load ROM, reset emulator, ...)
