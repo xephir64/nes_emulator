@@ -13,6 +13,8 @@ use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 
+pub mod apu;
+pub mod apu_channels;
 pub mod bus;
 pub mod cpu;
 pub mod frame;
@@ -30,6 +32,7 @@ extern crate lazy_static;
 fn main() {
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
+
     let window = video_subsystem
         .window("NES Emulator", (256.0 * 3.0) as u32, (240.0 * 3.0) as u32)
         .position_centered()
@@ -106,6 +109,7 @@ fn main() {
 
     cpu.reset();
     cpu.run();
+
     /*cpu.run_with_callback(move |cpu| {
         println!("{}", trace::trace(cpu));
         // ::std::thread::sleep(std::time::Duration::new(0, 70_000));

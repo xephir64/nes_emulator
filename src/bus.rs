@@ -1,4 +1,4 @@
-use crate::{cpu::Mem, joypad::Joypad, ppu::NesPPU, rom::Rom};
+use crate::{apu::Apu, cpu::Mem, joypad::Joypad, ppu::NesPPU, rom::Rom};
 
 const RAM: u16 = 0x0000;
 const RAM_MIRRORS_END: u16 = 0x1FFF;
@@ -11,6 +11,7 @@ pub struct Bus<'call> {
     cpu_vram: [u8; 2048],
     prg_rom: Vec<u8>,
     ppu: NesPPU,
+    apu: Apu,
 
     cycles: usize,
     gameloop_callback: Box<dyn FnMut(&NesPPU, &mut Joypad) + 'call>,
@@ -31,6 +32,7 @@ impl<'a> Bus<'a> {
             cycles: 0,
             gameloop_callback: Box::from(gameloop_callback),
             joypad: Joypad::new(),
+            apu: Apu::new(),
         }
     }
 
@@ -46,6 +48,10 @@ impl<'a> Bus<'a> {
     pub fn tick(&mut self, cycles: u8) {
         self.cycles += cycles as usize;
 
+        for _ in 0..cycles {
+            self.apu.tick();
+        }
+
         let nmi_before = self.ppu.nmi_interrupt.is_some();
         self.ppu.tick(cycles * 3);
         let nmi_after = self.ppu.nmi_interrupt.is_some();
@@ -57,6 +63,10 @@ impl<'a> Bus<'a> {
 
     pub fn poll_nmi_status(&mut self) -> Option<u8> {
         self.ppu.nmi_interrupt.take()
+    }
+
+    pub fn get_audio_samples(&mut self) -> Vec<f32> {
+        self.apu.take_samples()
     }
 }
 
@@ -85,10 +95,7 @@ impl<'a> Mem for Bus<'a> {
 
             ROM..=ROM_END => self.read_prg_rom(addr),
 
-            0x4000..=0x4015 => {
-                //ignore APU
-                0
-            }
+            0x4000..=0x4015 => self.apu.read_register(addr),
 
             0x4016 => self.joypad.read(),
 
@@ -142,7 +149,7 @@ impl<'a> Mem for Bus<'a> {
             }
 
             0x4000..=0x4013 | 0x4015 => {
-                //ignore APU
+                self.apu.write_register(addr, data);
             }
 
             0x4014 => {
