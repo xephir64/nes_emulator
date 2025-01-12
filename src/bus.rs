@@ -48,9 +48,7 @@ impl<'a> Bus<'a> {
     pub fn tick(&mut self, cycles: u8) {
         self.cycles += cycles as usize;
 
-        for _ in 0..cycles {
-            self.apu.tick();
-        }
+        self.apu.tick(self.cycles);
 
         let nmi_before = self.ppu.nmi_interrupt.is_some();
         self.ppu.tick(cycles * 3);
@@ -65,7 +63,11 @@ impl<'a> Bus<'a> {
         self.ppu.nmi_interrupt.take()
     }
 
-    pub fn get_audio_samples(&mut self) -> Vec<f32> {
+    pub fn poll_irq_status(&mut self) -> bool {
+        self.apu.irq_pending()
+    }
+
+    pub fn get_audio_samples(&mut self) -> Vec<i16> {
         self.apu.take_samples()
     }
 }
@@ -95,7 +97,7 @@ impl<'a> Mem for Bus<'a> {
 
             ROM..=ROM_END => self.read_prg_rom(addr),
 
-            0x4000..=0x4015 => self.apu.read_register(addr),
+            0x4015 => self.apu.read_register(),
 
             0x4016 => self.joypad.read(),
 
@@ -148,8 +150,8 @@ impl<'a> Mem for Bus<'a> {
                 self.ppu.write_to_data(data);
             }
 
-            0x4000..=0x4013 | 0x4015 => {
-                self.apu.write_register(addr, data);
+            0x4000..=0x4013 | 0x4015 | 0x4017 => {
+                self.apu.write_register(addr, data, self.cycles);
             }
 
             0x4014 => {
@@ -167,10 +169,6 @@ impl<'a> Mem for Bus<'a> {
             }
 
             0x4016 => self.joypad.write(data),
-
-            0x4017 => {
-                // ignore joypad 2;
-            }
 
             0x2008..=PPU_REGISTERS_MIRRORS_END => {
                 let mirror_down_addr = addr & 0b00100000_00000111;

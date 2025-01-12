@@ -8,10 +8,7 @@ pub struct Apu {
     triangle: TriangleChannel,
     frame_counter: FrameCounter,
 
-    sample_buffer: Vec<f32>,
-    sample_rate: u32,
-    sample_timer: f64,
-    clock_rate: u32,
+    buffer: Vec<i16>,
 }
 
 impl Apu {
@@ -23,10 +20,7 @@ impl Apu {
             pulse2: PulseChannel::new(),
             triangle: TriangleChannel::new(),
             frame_counter: FrameCounter::new(),
-            sample_buffer: Vec::new(),
-            sample_rate,
-            sample_timer: 0.0,
-            clock_rate,
+            buffer: Vec::new(),
         }
     }
 
@@ -34,30 +28,29 @@ impl Apu {
         let pulse_out = self.pulse1.generate_sample() + self.pulse2.generate_sample();
         let triangle_out = self.triangle.generate_sample();
 
-        (pulse_out * 0.5 + triangle_out * 0.5) / 2.0
+        //(pulse_out * 0.5 + triangle_out * 0.5) / 2.0
+        0.0
     }
 
-    pub fn tick(&mut self) {
-        self.frame_counter
-            .tick(&mut self.pulse1, &mut self.pulse2, &mut self.triangle);
+    pub fn tick(&mut self, cycles: usize) {
+        self.triangle.tick_sequencer();
 
-        self.sample_timer += (self.clock_rate / self.sample_rate) as f64;
-
-        if self.sample_timer >= 1.0 {
-            self.sample_timer -= 1.0;
-            let sample = self.generate_sample();
-            self.sample_buffer.push(sample);
+        if cycles % 2 == 1 {
+            //self.pulse1.tick();
         }
     }
 
-    pub fn take_samples(&mut self) -> Vec<f32> {
-        let samples = self.sample_buffer.clone();
-        self.sample_buffer.clear();
+    pub fn take_samples(&mut self) -> Vec<i16> {
+        let samples = self.buffer.clone();
+        self.buffer.clear();
         samples
     }
 
-    pub fn write_register(&mut self, addr: u16, data: u8) {
-        println!("APU write at {:x}", addr);
+    pub fn irq_pending(&mut self) -> bool {
+        !self.frame_counter.is_interrupt_inhibit()
+    }
+
+    pub fn write_register(&mut self, addr: u16, data: u8, cycles: usize) {
         match addr {
             0x4000..=0x4003 => self.pulse1.write_register(addr, data),
             0x4004..=0x4007 => self.pulse2.write_register(addr, data),
@@ -67,44 +60,12 @@ impl Apu {
                 self.pulse2.set_enabled(data & 0b0000_0010 != 0);
                 self.triangle.set_enabled(data & 0b0000_0100 != 0);
             }
+            0x4017 => self.frame_counter.write_control(data),
             _ => {}
         }
     }
 
-    pub fn read_register(&self, addr: u16) -> u8 {
-        print!("APU read at {:x}", addr);
-        match addr {
-            0x4000..=0x4007 => {
-                println!(
-                    "Warning: Read from write-only pulse/triangle register at {:04X}",
-                    addr
-                );
-                0
-            }
-            0x4008..=0x400B => {
-                println!(
-                    "Warning: Read from write-only triangle register at {:04X}",
-                    addr
-                );
-                0
-            }
-            0x4015 => {
-                let mut status = 0;
-                if self.pulse1.get_length_counter() > 0 {
-                    status |= 0b0000_0001;
-                }
-                if self.pulse2.get_length_counter() > 0 {
-                    status |= 0b0000_0010;
-                }
-                if self.triangle.get_length_counter() > 0 {
-                    status |= 0b0000_0100;
-                }
-                status
-            }
-            _ => {
-                println!("Warning: Invalid APU read at {:04X}", addr);
-                0
-            }
-        }
+    pub fn read_register(&self) -> u8 {
+        0
     }
 }

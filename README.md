@@ -40,4 +40,5 @@
 
 ### APU
 - [NESDev APU](https://www.nesdev.org/wiki/APU)
+- [NESDev APU Envelope](https://www.nesdev.org/wiki/APU_Envelope) 
 - [NESDev APU Mixer](https://www.nesdev.org/wiki/APU_Mixer)

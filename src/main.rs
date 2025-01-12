@@ -18,6 +18,7 @@ pub mod apu_channels;
 pub mod bus;
 pub mod cpu;
 pub mod frame;
+pub mod interrupt;
 pub mod joypad;
 pub mod opcode;
 pub mod palette;

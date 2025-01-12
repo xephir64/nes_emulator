@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     bus::Bus,
+    interrupt::{self, Interrupt},
     opcode::{self},
 };
 
@@ -765,16 +766,16 @@ impl<'a> CPU<'a> {
         self.run_with_callback(|_| {});
     }
 
-    fn interrupt_nmi(&mut self) {
+    fn interrupt(&mut self, interrupt: Interrupt) {
         self.stack_push_u16(self.program_counter);
-        self.status = self.status & 0b1110_1111; // unset BREAK
-        self.status = self.status | 0b0010_0000; // set BREAK 2
+        self.status &= 0b1110_1111;
+        self.status |= interrupt.b_flag_mask;
 
         self.stack_push(self.status);
-        self.status = self.status | 0b0000_0100; // set interrupt mode
+        self.status = self.status | 0b0000_0100; // set interrupt disable
 
-        self.bus.tick(2);
-        self.program_counter = self.mem_read_u16(0xfffA);
+        self.bus.tick(interrupt.cpu_cycles);
+        self.program_counter = self.mem_read_u16(interrupt.vector_addr);
     }
 
     pub fn run_with_callback<F>(&mut self, mut callback: F)
@@ -785,7 +786,10 @@ impl<'a> CPU<'a> {
 
         loop {
             if let Some(_nmi) = self.bus.poll_nmi_status() {
-                self.interrupt_nmi();
+                self.interrupt(interrupt::NMI);
+            } else if self.bus.poll_irq_status() && (self.status & 0b0000_0100 == 0) {
+                println!("triggered IRQ interrupt");
+                self.interrupt(interrupt::IRQ);
             }
 
             callback(self);
@@ -1044,6 +1048,16 @@ impl<'a> CPU<'a> {
 
                 "BRK" => {
                     return;
+                    // TODO Handle BRK Interrupt
+                    /*self.program_counter += 1;
+                    if self.mem_read(interrupt::BRK.vector_addr) == 0x00 {
+                        // self.program_counter
+                        return;
+                    }
+
+                    if self.status & 0b0000_0100 == 0 {
+                        self.interrupt(interrupt::BRK);
+                    }*/
                 }
 
                 // Undocumented Instructions

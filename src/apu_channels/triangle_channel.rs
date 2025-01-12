@@ -35,6 +35,8 @@ impl TriangleChannel {
         }
     }
 
+    pub fn tick_sequencer(&mut self) {}
+
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
         if !enabled {

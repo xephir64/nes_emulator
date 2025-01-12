@@ -1,76 +1,96 @@
+use super::{envelope::Envelope, length_counter::LengthCounter, sweep_unit::SweepUnit};
+
+const EIGHTH_DUTY_CYCLE: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 1];
+const QUARTER_DUTY_CYCLE: [u8; 8] = [0, 0, 0, 0, 0, 0, 1, 1];
+const HALF_DUTY_CYCLE: [u8; 8] = [0, 0, 0, 0, 1, 1, 1, 1];
+const NEGATIVE_QUARTER_DUTY_CYCLE: [u8; 8] = [1, 1, 1, 1, 1, 1, 0, 0];
 pub struct PulseChannel {
     enabled: bool,
-    duty: u8,
-    length_counter: u8,
+
+    length_counter: LengthCounter,
+    envelope: Envelope,
+    sweep_unit: SweepUnit,
+
+    duty_cycle: [u8; 8],
+
+    sequence: usize,
+    timer_load: u16,
     timer: u16,
-    timer_reload: u16,
-    current_step: u8,
 }
 
 impl PulseChannel {
     pub fn new() -> Self {
         Self {
             enabled: false,
-            duty: 0,
-            length_counter: 0,
+            length_counter: LengthCounter::new(),
+            envelope: Envelope::new(),
+            sweep_unit: SweepUnit::new(),
+            duty_cycle: EIGHTH_DUTY_CYCLE,
+            sequence: 0,
+            timer_load: 0,
             timer: 0,
-            timer_reload: 0,
-            current_step: 0,
         }
     }
 
     pub fn write_register(&mut self, addr: u16, data: u8) {
-        match addr {
-            0x4000 | 0x4004 => {
-                self.duty = (data >> 6) & 0b11;
-                self.length_counter = data & 0b0011_1111;
+        match addr % 4 {
+            0 => {
+                self.duty_cycle = match data >> 6 {
+                    0b00 => EIGHTH_DUTY_CYCLE,
+                    0b01 => QUARTER_DUTY_CYCLE,
+                    0b10 => HALF_DUTY_CYCLE,
+                    0b11 => NEGATIVE_QUARTER_DUTY_CYCLE,
+                    _ => panic!(),
+                };
+                self.envelope.write_envelope(data);
+                self.length_counter.set_halt(data & 0b0010_0000 != 0);
             }
-            0x4002 | 0x4006 => {
-                self.timer_reload = (self.timer_reload & 0xFF00) | data as u16;
+            1 => self.sweep_unit.update(data),
+            2 => {
+                self.timer_load = (self.timer_load & 0b0111_0000_0000) | data as u16;
             }
-            0x4003 | 0x4007 => {
-                self.timer_reload = (self.timer_reload & 0x00FF) | ((data as u16 & 0b111) << 8);
-                self.length_counter = (data >> 3) & 0x1F;
+            3 => {
+                if self.enabled {
+                    self.length_counter.set(data);
+                }
+                self.timer_load = (self.timer_load & 0b1111_1111) | ((data as u16 & 0b111) << 8);
+
+                self.sequence = 0;
+                self.envelope.set_start_flag();
             }
             _ => {}
         }
     }
 
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
-        if !enabled {
-            self.length_counter = 0;
-        }
-    }
-
-    pub fn decrement_length_counter(&mut self) {
-        if self.length_counter > 0 {
-            self.length_counter -= 1;
-        }
-    }
-
-    pub fn get_length_counter(&self) -> u8 {
-        self.length_counter
-    }
-
-    pub fn generate_sample(&self) -> f32 {
-        if !self.enabled || self.length_counter == 0 {
-            return 0.0;
-        }
-
-        let duty_patterns = [
-            0b00000001, // 12.5%
-            0b00000011, // 25%
-            0b00001111, // 50%
-            0b11111100, // 75%
-        ];
-        let duty_pattern = duty_patterns[self.duty as usize];
-        let step = (self.timer % 8) as u8;
-
-        if (duty_pattern >> (7 - step)) & 1 == 0 {
-            0.0
+    pub fn generate_sample(&self) -> u8 {
+        if self.duty_cycle[self.sequence] != 0
+            && self.length_counter.is_non_zero()
+            && self.timer >= 8
+        {
+            self.envelope.volume()
         } else {
-            0.8
+            0
+        }
+    }
+
+    pub fn clock_timer(&mut self) {
+        if self.timer == 0 {
+            self.timer = self.timer_load;
+
+            self.sequence = (self.sequence + 1) & 7;
+            println!(
+                "Clocking PulseChannel, duty_cycle: {:?} to step {}",
+                self.duty_cycle, self.sequence
+            )
+        } else {
+            self.timer -= 1;
+        }
+    }
+
+    pub fn set_enabled(&mut self, value: bool) {
+        self.enabled = value;
+        if !value {
+            self.length_counter.disable();
         }
     }
 }
